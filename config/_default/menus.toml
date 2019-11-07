@@ -11,19 +11,19 @@
 [[main]]
   name = "Blog"
   url = "#posts"
-  weight = 50
+  weight = 20
 
 [[main]]
   name = "Publications"
   url = "#publications"
-  weight = 20
-
-[[main]]
-   name = "CV"
-   url = "pdf/cv.pdf"
-   weight = 30
+  weight = 30
 
 [[main]]
   name = "Contact"
   url = "#contact"
-  weight = 60
+  weight = 40
+
+[[main]]
+   name = "CV"
+   url = "pdf/cv.pdf"
+   weight = 60

@@ -15,12 +15,13 @@ role: Postdoctoral Research Scientist
 # Organizations/Affiliations
 organizations:
 - name: Columbia University
-  url: ""
+  url: "https://psychology.columbia.edu/"
 
 # Short bio (displayed in user profile at end of posts)
-bio: I am a cognitive scientist at Columbia University.
+bio: Cognitive scientist at Columbia University
 
 interests:
+- Confidence and curiosity
 - Cognition
 - Applied Statistics
 
@@ -68,9 +69,9 @@ social:
 
 # Link to a PDF of your resume/CV from the About widget.
 # To enable, copy your resume/CV to `static/files/cv.pdf` and uncomment the lines below.  
-- icon: cv
-  icon_pack: ai
-  link: pdf/cv.pdf
+# - icon: cv
+#   icon_pack: ai
+#   link: pdf/cv.pdf
 
 # Enter email to display Gravatar (if Gravatar enabled in Config)
 email: ""
