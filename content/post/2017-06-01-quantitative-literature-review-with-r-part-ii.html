@@ -1,0 +1,396 @@
+---
+title: 'Quantitative literature review with R: Exploring Psychonomic Society Journals,
+  Part II'
+author: Matti Vuorre
+date: '2017-06-02'
+slug: quantitative-literature-review-with-r-part-ii
+categories:
+  - data science
+tags:
+  - R
+  - tutorial
+  - data visualization
+  - dplyr
+  - ggplot2
+  - psychology
+  - psychonomic society
+draft: no
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 2
+summary: "In this tutorial, I'll show how to use R to quantitatively explore, analyze, and visualize a research literature, using Psychonomic Society publications. This post directly continues from [part I of Quantitative literature review with R](https://mvuorre.github.io/post/2017/quantitative-literature-review-with-r-part-i/). Please read that first for context. Part I focused on data cleaning and simple figures, but here we will look at relational data by visualizing some network structures in the data. "
+---
+
+
+<div id="TOC">
+<ul>
+<li><a href="#tags">Tags</a><ul>
+<li><a href="#exploring-univariate-tags">Exploring univariate tags</a></li>
+</ul></li>
+<li><a href="#network-analysis-of-tags">Network analysis of Tags</a><ul>
+<li><a href="#preparing-the-adjacency-matrix">Preparing the adjacency matrix</a></li>
+<li><a href="#visualizing-the-adjacency-matrix">Visualizing the adjacency matrix</a></li>
+</ul></li>
+<li><a href="#the-bayes-network">The Bayes Network</a></li>
+</ul>
+</div>
+
+<p>(This post directly continues from <a href="https://mvuorre.github.io/post/2017/quantitative-literature-review-with-r-part-i/">part I of Quantitative literature review with R</a>. Please read that first for context.) In this tutorial, I’ll show how to use R to quantitatively explore, analyze, and visualize a broad research literature, using all Psychonomic Society publications between 2004 and 2016. Part I focused on data cleaning and simple figures, but here we will look at relational data by visualizing some network structures in the data.</p>
+<p>We’ll be working with R, so if you want to follow along on your own computer, fire up R and load up the required R packages:</p>
+<pre class="r"><code>library(tidyverse)
+library(stringr)</code></pre>
+<p>The data is contained in the <a href="https://github.com/mvuorre/psychLit/">psychLit</a> R package:</p>
+<pre class="r"><code>library(psychLit)
+d &lt;- psychLit</code></pre>
+<p>As before, we limit the investigation to Psychonomic Society journals:</p>
+<pre class="r"><code>(journals &lt;- unique(d$`Source title`))</code></pre>
+<pre><code>##  [1] &quot;Acta Psychologica&quot;                                                   
+##  [2] &quot;Applied Cognitive Psychology&quot;                                        
+##  [3] &quot;Attention, Perception, and Psychophysics&quot;                            
+##  [4] &quot;Behavior Research Methods&quot;                                           
+##  [5] &quot;Behavioral and Brain Sciences&quot;                                       
+##  [6] &quot;Cognition&quot;                                                           
+##  [7] &quot;Cognitive, Affective and Behavioral Neuroscience&quot;                    
+##  [8] &quot;Cognitive Psychology&quot;                                                
+##  [9] &quot;Cognitive Science&quot;                                                   
+## [10] &quot;Consciousness and Cognition&quot;                                         
+## [11] &quot;Current Directions in Psychological Science&quot;                         
+## [12] &quot;Journal of Experimental Psychology: General&quot;                         
+## [13] &quot;Journal of Experimental Psychology: Human Perception and Performance&quot;
+## [14] &quot;Journal of Experimental Psychology: Learning Memory and Cognition&quot;   
+## [15] &quot;Journal of Mathematical Psychology&quot;                                  
+## [16] &quot;Journal of Memory and Language&quot;                                      
+## [17] &quot;Learning and Behavior&quot;                                               
+## [18] &quot;Memory &amp; Cognition&quot;                                                  
+## [19] &quot;Perception &amp; Psychophysics&quot;                                          
+## [20] &quot;Psychological Methods&quot;                                               
+## [21] &quot;Psychological Review&quot;                                                
+## [22] &quot;Psychological Science&quot;                                               
+## [23] &quot;Psychonomic Bulletin and Review&quot;                                     
+## [24] &quot;Quarterly Journal of Experimental Psychology&quot;                        
+## [25] &quot;Trends in Cognitive Sciences&quot;</code></pre>
+<pre class="r"><code>d &lt;- filter(d, `Source title` %in% journals[c(3, 4, 7, 17, 18, 23)])</code></pre>
+<p>We’ve got data on quite a few variables which we could imagine are interconnected, such as Tags (<code>Keywords</code>), <code>Authors</code>, and the articles themselves (through the <code>References</code> variable).</p>
+<pre class="r"><code>glimpse(d)</code></pre>
+<pre><code>## Observations: 9,653
+## Variables: 24
+## $ Authors                     &lt;chr&gt; &quot;Todorović D.&quot;, &quot;Cardoso-Leite P.,...
+## $ Title                       &lt;chr&gt; &quot;The effect of the observer vantag...
+## $ Year                        &lt;int&gt; 2009, 2009, 2009, 2009, 2009, 2009...
+## $ `Source title`              &lt;chr&gt; &quot;Attention, Perception, and Psycho...
+## $ Volume                      &lt;int&gt; 71, 71, 71, 71, 71, 71, 71, 71, 71...
+## $ Issue                       &lt;chr&gt; &quot;1&quot;, &quot;1&quot;, &quot;1&quot;, &quot;1&quot;, &quot;1&quot;, &quot;1&quot;, &quot;1&quot;,...
+## $ `Art. No.`                  &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ `Page count`                &lt;int&gt; 10, 12, 2, 11, 14, 16, 11, 8, 5, 5...
+## $ `Cited by`                  &lt;int&gt; 16, 15, 8, NA, 19, 22, 1, 17, 13, ...
+## $ DOI                         &lt;chr&gt; &quot;10.3758/APP.71.1.183&quot;, &quot;10.3758/A...
+## $ Affiliations                &lt;chr&gt; &quot;University of Belgrade, Belgrade,...
+## $ `Authors with affiliations` &lt;chr&gt; &quot;Todorović, D., University of Belg...
+## $ Abstract                    &lt;chr&gt; &quot;Some features of linear perspecti...
+## $ `Author Keywords`           &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ `Index Keywords`            &lt;chr&gt; &quot;art; article; attention; depth pe...
+## $ `Funding Details`           &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ `Funding Text`              &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ References                  &lt;chr&gt; &quot;Ames A., Jr., The illusion of dep...
+## $ `Correspondence Address`    &lt;chr&gt; &quot;Todorović, D.; Laboratory of Expe...
+## $ Publisher                   &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ ISSN                        &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ `PubMed ID`                 &lt;int&gt; 19304608, 19304599, 19304592, NA, ...
+## $ `Abbreviated Source Title`  &lt;chr&gt; &quot;Atten. Percept. Psychophys.&quot;, &quot;At...
+## $ `Document Type`             &lt;chr&gt; &quot;Article&quot;, &quot;Article&quot;, &quot;Article&quot;, &quot;...</code></pre>
+<p>Let’s begin by looking at the articles’ Keywords.</p>
+<div id="tags" class="section level1">
+<h1>Tags</h1>
+<p>These are the things that you have to choose to describe your article when you submit it for publication. They are called Keywords in the data, but I’m going to refer to them as Tags for brevity. Also, I will only work with the <code>Author Keywords</code>, because it seems like Scopus’s automatic index keywords are mostly nonsense or missing.</p>
+<p>So our first operation is to rename the <code>Author Keywords</code> variable to <code>Tags</code>, and get rid of the automatic keywords altogether.</p>
+<pre class="r"><code>d &lt;- rename(d, Tags = `Author Keywords`) %&gt;% 
+    select(-`Index Keywords`)</code></pre>
+<p>Before moving on to networks, let’s take a look at what these tags are like: How many are there? Do people use them consistently?</p>
+<div id="exploring-univariate-tags" class="section level2">
+<h2>Exploring univariate tags</h2>
+<p>Our first goal is to simply visualize the most common tags. However, recall that the <code>Tags</code> variable in the data is quite messy:</p>
+<pre><code>## # A tibble: 3 x 1
+##   Tags 
+##   &lt;chr&gt;
+## 1 &lt;NA&gt; 
+## 2 &lt;NA&gt; 
+## 3 &lt;NA&gt;</code></pre>
+<p>Each value of <code>Tags</code> is a kind of a list, whose individual items are separated by semicolons. What we’d like to have is a variable (column in a data frame) where every item is a single tag, so we need to do some kind of a data unwrapping operation.</p>
+<p>The unwrapping can be done by simply splitting the <code>Tags</code> variable on each semicolon (and space) found in each string, but this creates a strange variable:</p>
+<pre class="r"><code>d %&gt;% 
+    select(Tags) %&gt;% 
+    mutate(Tags = str_split(Tags, &quot;; &quot;)) </code></pre>
+<pre><code>## # A tibble: 9,653 x 1
+##    Tags     
+##    &lt;list&gt;   
+##  1 &lt;chr [1]&gt;
+##  2 &lt;chr [1]&gt;
+##  3 &lt;chr [1]&gt;
+##  4 &lt;chr [1]&gt;
+##  5 &lt;chr [1]&gt;
+##  6 &lt;chr [1]&gt;
+##  7 &lt;chr [1]&gt;
+##  8 &lt;chr [1]&gt;
+##  9 &lt;chr [1]&gt;
+## 10 &lt;chr [1]&gt;
+## # ... with 9,643 more rows</code></pre>
+<p>This is where things get really interesting. A few lines above, we conceptualized each value (cell) of <code>Tags</code> as a sort of a list. We have now operationalized that idea by creating a <code>Tags</code> variable that is an R <strong>list-column</strong>, meaning that each cell can contain a complex R object. Here, each value is a list of character values. To make this notion concrete, look at the first row (<code>slice(1)</code>) of the Tags variable (<code>.$Tags</code>, <code>.</code> is a placeholder of the data being passed by <code>%&gt;%</code> arrows) by using the familiar <code>str()</code> function:</p>
+<pre class="r"><code>d %&gt;% 
+    select(Tags) %&gt;% 
+    mutate(Tags = str_split(Tags, &quot;; &quot;)) %&gt;% 
+    slice(1) %&gt;% 
+    .$Tags %&gt;%  str()</code></pre>
+<pre><code>## List of 1
+##  $ : chr NA</code></pre>
+<p>All the tags associated with the first article in our data frame are in a neat list of neat character strings. Brilliant. This data format is quite foreign to us who are used to working with strictly flat rectangular data, but has a certain recursive beauty to it. Now that our list is concrete, we can unlist it to create a Tags variable whose each row is one individual tag.</p>
+<pre class="r"><code>d %&gt;% 
+    select(Tags) %&gt;% 
+    mutate(Tags = str_split(Tags, &quot;; &quot;)) %&gt;% 
+    unnest(Tags)</code></pre>
+<pre><code>## # A tibble: 26,358 x 1
+##    Tags 
+##    &lt;chr&gt;
+##  1 &lt;NA&gt; 
+##  2 &lt;NA&gt; 
+##  3 &lt;NA&gt; 
+##  4 &lt;NA&gt; 
+##  5 &lt;NA&gt; 
+##  6 &lt;NA&gt; 
+##  7 &lt;NA&gt; 
+##  8 &lt;NA&gt; 
+##  9 &lt;NA&gt; 
+## 10 &lt;NA&gt; 
+## # ... with 26,348 more rows</code></pre>
+<p>Excellent! This data frame has one variable, <code>Tags</code>, where each observation is an individual tag. Now we can go ahead and count and summarise the tags. From here onwards, it’s all <a href="http://dplyr.tidyverse.org/articles/dplyr.html">regular dplyr verbs</a>:</p>
+<pre class="r"><code>d %&gt;% 
+    select(Tags) %&gt;% 
+    mutate(Tags = str_split(Tags, &quot;; &quot;)) %&gt;% 
+    unnest(Tags) %&gt;% 
+    filter(!is.na(Tags)) %&gt;%  # Remove missing observations
+    group_by(Tags) %&gt;%  # Group by unique Tags
+    count() %&gt;%  # And count them
+    ungroup() %&gt;% 
+    top_n(40) %&gt;%  # Choose n most numerous Tags
+    mutate(Tags = reorder(Tags, n)) %&gt;%  # {1}
+    ggplot(aes(n, Tags)) +
+    geom_point() +
+    geom_segment(aes(xend = 0, yend=Tags)) +
+    scale_x_continuous(limits = c(0, 400), expand = c(0, 0)) +
+    labs(x=&quot;Number of articles&quot;, y=&quot;&quot;,
+         subtitle = &quot;Top 30 tags in Psychonomics Journals&quot;,
+         caption = &quot;Data for years 2004-2016 only&quot;)</code></pre>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-ii_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p><code>{1}</code> reordered the <code>Tags</code> so that they are nicely ordered in the figure on the <code>n</code> variable. You could also do a wordcloud with these data, but I think I’ll refrain this time. Instead, what I’ll do is explore popular tags by journal. The “pipeline” to get tags by journal is almost identical, except that we’ll keep the <code>Publication</code> variable in the data.</p>
+<p>The following code is a little more complicated than is required for a simple plot, but I wanted to order the <code>Tags</code> inside each publication, which <a href="https://drsimonj.svbtle.com/ordering-categories-within-ggplot2-facets">required a little bit of extra work</a> as described by @<a href="https://twitter.com/drsimonj">drsimonj</a>. Below, I’ll work with journal abbreviations.</p>
+<pre class="r"><code>pd &lt;- d %&gt;% 
+    select(`Abbreviated Source Title`, Tags) %&gt;% 
+    mutate(Tags = str_split(Tags, &quot;; &quot;)) %&gt;% 
+    unnest(Tags) %&gt;% 
+    filter(!is.na(Tags)) %&gt;%
+    group_by(`Abbreviated Source Title`, Tags) %&gt;%  # Group by unique Tags AND journals
+    count() %&gt;%  # And count them
+    group_by(`Abbreviated Source Title`) %&gt;% 
+    top_n(10, n) %&gt;%  # Select top 10 tags within each journal
+    ungroup() %&gt;% 
+    arrange(`Abbreviated Source Title`, n) %&gt;%  # Arrange by n within journals
+    mutate(order = row_number())  # Will order Tags on this
+pd</code></pre>
+<pre><code>## # A tibble: 61 x 4
+##    `Abbreviated Source Title`  Tags                      n order
+##    &lt;chr&gt;                       &lt;chr&gt;                 &lt;int&gt; &lt;int&gt;
+##  1 Atten. Percept. Psychophys. Speech perception        37     1
+##  2 Atten. Percept. Psychophys. Working memory           39     2
+##  3 Atten. Percept. Psychophys. Visual working memory    46     3
+##  4 Atten. Percept. Psychophys. Visual attention         48     4
+##  5 Atten. Percept. Psychophys. Attentional capture      56     5
+##  6 Atten. Percept. Psychophys. Selective attention      58     6
+##  7 Atten. Percept. Psychophys. Visual perception        63     7
+##  8 Atten. Percept. Psychophys. Eye movements            68     8
+##  9 Atten. Percept. Psychophys. Visual search           136     9
+## 10 Atten. Percept. Psychophys. Attention               195    10
+## # ... with 51 more rows</code></pre>
+<p>That was more complicated than usual, so I wanted to print out the intermediate result as well. We can now use it to plot:</p>
+<pre class="r"><code>pd %&gt;%     
+    ggplot(aes(n, order)) +
+    geom_point() +
+    geom_segment(aes(xend = 0, yend=order)) +
+    scale_y_continuous(breaks = pd$order, labels = pd$Tags) +
+    scale_x_continuous(expand = c(0.02, 0)) +
+    labs(x=&quot;Number of articles&quot;, y=&quot;&quot;,
+         subtitle = &quot;Top 10 tags within 6 Psychonomics Journals&quot;,
+         caption = &quot;Data for years 2004-2016 only&quot;) +
+    facet_wrap(&quot;`Abbreviated Source Title`&quot;, scales=&quot;free&quot;, ncol=2)</code></pre>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-ii_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>Finally, let’s look at the overall distribution of the tags as a histogram:</p>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-ii_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>There are about 8000 unique Tags, and about 7000 of them occur fewer than three times in the corpus. Now that we have some idea of what kinds of tags there are in the data, roughly what their distributions might look like, and how they vary across the journals, we are ready to look at networks of tags.</p>
+</div>
+</div>
+<div id="network-analysis-of-tags" class="section level1">
+<h1>Network analysis of Tags</h1>
+<p>Network analysis (or graph analysis) is a vast and complicated area, and my graph analysis skills are a little rusty. So here we’ll simply illustrate how to format the data in an appropriate way, and draw a few example graphs. I referred to <a href="http://kateto.net/network-visualization">this website</a> more than once while working on this (also thanks to @<a href="https://twitter.com/jalapic">jalapic</a> for tips).</p>
+<p>The first graph will be about <code>Tags</code>. We’ll try to illustrate how and which tags co-occur within articles in the Psychonomic Society journals between 2004 and 2016.</p>
+<p>90% of data analysis is data cleaning and manipulation, and network analysis is no exception. The first data manipulation step is to create an adjacency matrix where each row and column is a tag, where the values in the cells are the number of times those tags co-occurred (were present in the same article.) I found <a href="http://stackoverflow.com/a/13281606/4087279">this stack overflow answer</a> and <a href="http://varianceexplained.org/r/love-actually-network/">this blogpost</a> helpful when preparing the data.</p>
+<div id="preparing-the-adjacency-matrix" class="section level2">
+<h2>Preparing the adjacency matrix</h2>
+<p>In order to create the adjacency matrix we need to solve a sequence of smaller problems. First, we’ll take two columns from the data, one for <code>Tags</code> and another one that uniquely identifies each article (doesn’t matter what it is, here we use a created variable called <code>item</code>). Then we unnest the Tags into single tags per row as detailed above, and remove empty tags.</p>
+<pre class="r"><code>m &lt;- d %&gt;% 
+    rownames_to_column(&quot;item&quot;) %&gt;% 
+    select(Tags, item) %&gt;% 
+    mutate(Tags = str_split(Tags, &quot;; &quot;)) %&gt;% 
+    unnest(Tags) %&gt;% 
+    filter(!is.na(Tags))
+m</code></pre>
+<pre><code>## # A tibble: 21,446 x 2
+##    item  Tags                   
+##    &lt;chr&gt; &lt;chr&gt;                  
+##  1 417   Exogenous cuing        
+##  2 417   Perceived duration     
+##  3 417   Spatial attention      
+##  4 418   Intersensory perception
+##  5 418   Synesthetic congruency 
+##  6 418   Temporal ventriloquism 
+##  7 418   Visual TOJ             
+##  8 419   Coordinate systems     
+##  9 419   Eye-centered           
+## 10 419   Reference frame        
+## # ... with 21,436 more rows</code></pre>
+<p>Next, I remove all tags from the data that occurred fewer than a couple of times, because otherwise the data would be too large and messy.</p>
+<pre class="r"><code>m &lt;- group_by(m, Tags) %&gt;% 
+    mutate(n = n()) %&gt;% 
+    filter(n &gt; 8) %&gt;% 
+    ungroup() %&gt;% 
+    select(-n)</code></pre>
+<p>Next, we need a variable that identifies whether the tag occurred in the article or not:</p>
+<pre class="r"><code>m$occur &lt;- 1
+slice(m, 1:2)</code></pre>
+<pre><code>## # A tibble: 2 x 3
+##   item  Tags              occur
+##   &lt;chr&gt; &lt;chr&gt;             &lt;dbl&gt;
+## 1 417   Spatial attention     1
+## 2 419   Saccades              1</code></pre>
+<p>Note that <code>occur</code> must be one. To create the matrix we need <em>all</em> the item-tag pairs, even ones that didn’t occur. For these pairs, <code>occur</code> will be zero. The tidyr package in tidyverse provides the perfect helper function for this purpose:</p>
+<pre class="r"><code>m &lt;- m %&gt;% 
+    complete(item, Tags, fill = list(occur=0))
+m</code></pre>
+<pre><code>## # A tibble: 1,274,021 x 3
+##    item  Tags                      occur
+##    &lt;chr&gt; &lt;chr&gt;                     &lt;dbl&gt;
+##  1 1000  3-D perception                0
+##  2 1000  Action                        0
+##  3 1000  Action control                0
+##  4 1000  Adaptation                    0
+##  5 1000  Affect                        0
+##  6 1000  Age of acquisition            0
+##  7 1000  Aging                         0
+##  8 1000  Amygdala                      0
+##  9 1000  Animal cognition              0
+## 10 1000  Anterior cingulate cortex     0
+## # ... with 1,274,011 more rows</code></pre>
+<p>Now we have a data frame with 1274021 rows; each row signifying a possible article - Tag co-occurrence. Most <code>occur</code>s will, of course, be zero.</p>
+<p>Now we can create the co-occurrence matrix. We first spread Tags over the columns, such that each column is a unique tag, each row is an article, and the cell values are occurrences.</p>
+<pre class="r"><code>library(reshape2)
+y &lt;- m %&gt;% 
+    acast(Tags~item, value.var=&quot;occur&quot;, fun.aggregate = sum)
+y[1:2, 1:2]</code></pre>
+<pre><code>##                1000 1001
+## 3-D perception    0    0
+## Action            0    0</code></pre>
+<pre class="r"><code>y[y&gt;1] &lt;- 1  # Remove duplicates</code></pre>
+<p>All we need to do then is to make a symmetric matrix where both rows and columns are Tags, and the cell values are numbers of co-occurrences. So we matrix multiply <code>y</code> with its transpose:</p>
+<pre class="r"><code>co &lt;- y %*% t(y)
+co[1:3, 1:3]</code></pre>
+<pre><code>##                3-D perception Action Action control
+## 3-D perception             11      0              0
+## Action                      0     22              0
+## Action control              0      0              9</code></pre>
+</div>
+<div id="visualizing-the-adjacency-matrix" class="section level2">
+<h2>Visualizing the adjacency matrix</h2>
+<p>It’s important to understand what <code>co</code> is; it’s a symmetric matrix whose rows and columns are tags, and their co-occurrences are numerically represented at their intersections. For example, Action and 3-D perception never co-occurred in the data, but Adaptation and 3-D percetion co-occurred once. We are now in an excellent position to investigate what tags tend to co-occur.</p>
+<p>First, let’s use igraph to create the graph object <code>g</code>, and take out some unnecessary information from it.</p>
+<pre class="r"><code>library(igraph)
+g &lt;- graph.adjacency(co, weighted=TRUE, mode =&#39;undirected&#39;)
+g &lt;- simplify(g)</code></pre>
+<p><code>g</code> is now an igraph R object that contains edges and vertices, and information about them. For example, we can use <code>V(g)$name</code> to look at the Vertice names. Some of these are quite long, so I’ll create another variable for each Vertice, called <code>label</code>, which is the name, but replacing each space with a newline character. This will make some of the graphs prettier.</p>
+<pre class="r"><code>V(g)$label &lt;- gsub(&quot; &quot;, &quot;\n&quot;, V(g)$name)</code></pre>
+<p>Networks are very complicated visualizations, and if you simply call <code>plot(g)</code>, you’ll get an ugly mess of a figure:</p>
+<pre class="r"><code>plot(g)</code></pre>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-ii_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
+<p>There are more parameters to the <code>plot()</code> command than can be listed here, but I tried out a few different options, and this is what I ended up with:</p>
+<pre class="r"><code>plot(g,
+     layout = layout_on_sphere(g),
+     edge.width = E(g)$weight/7,
+     edge.color = adjustcolor(&quot;dodgerblue1&quot;, .7),
+     vertex.color = adjustcolor(&quot;white&quot;, .8),
+     vertex.frame.color=adjustcolor(&quot;dodgerblue4&quot;, .4),
+     vertex.size=1.9,
+     vertex.label.family = &quot;Helvetica&quot;,
+     vertex.label.font=1,
+     vertex.label.cex=.75,
+     vertex.label.color=&quot;black&quot;,
+     vertex.label = ifelse(degree(g) &gt; 35, V(g)$label, NA))</code></pre>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-ii_files/figure-html/unnamed-chunk-23-1.png" width="864" /></p>
+</div>
+</div>
+<div id="the-bayes-network" class="section level1">
+<h1>The Bayes Network</h1>
+<p>The next network will be fairly involved. Our goal is to visualize the prominence and connectedness of Psychonomic Society’s “Bayesians”. Who are these Bayesians, you might ask? Our definition here is simply: “An author who has published one or more articles in Psychonomic Journals (2004 - 2016) where the keywords contained the word ‘Bayes’.” This is obviously suboptimal because someone might have published an article called “Why I’m not a Bayesian”, yet they would be included in this graph, but we’ll go with this for now.</p>
+<p>I’ll let the code speak for itself this time. If it is impossible to parse, I recommend downloading the data (see top of post) to your own computer and running the code yourself.</p>
+<pre class="r"><code>m &lt;- d %&gt;% 
+    rownames_to_column(&quot;item&quot;) %&gt;% 
+    select(Authors, Tags, item) %&gt;% 
+    mutate(Authors = str_split(Authors, &quot;, &quot;)) %&gt;% 
+    unnest(Authors) %&gt;% 
+    filter(!is.na(Tags), !is.na(Authors)) %&gt;% 
+    filter(grepl(&quot;bayes&quot;, Tags, ignore.case = T))
+m$occur &lt;- 1
+m &lt;- m %&gt;% 
+    complete(item, Authors, fill = list(occur=0)) %&gt;% 
+    select(-Tags)
+m</code></pre>
+<pre><code>## # A tibble: 20,678 x 3
+##    item  Authors     occur
+##    &lt;chr&gt; &lt;chr&gt;       &lt;dbl&gt;
+##  1 1234  Adger D.        0
+##  2 1234  Annis J.        0
+##  3 1234  Arnold D.       0
+##  4 1234  Arnold N.R.     0
+##  5 1234  Bååth R.        0
+##  6 1234  Bakker M.       0
+##  7 1234  Bar M.          0
+##  8 1234  Barker J.D.     0
+##  9 1234  Barr S.         0
+## 10 1234  Bartlema A.     0
+## # ... with 20,668 more rows</code></pre>
+<p>In these data, we have simply counted whether an author “occurred” in an article, and only included articles whose <code>Tags</code> included the word “bayes” in any shape or form. This network will therefore visualize the connectedness of “Bayesian”, as in who has published papers with whom.</p>
+<p>We can then re-run pretty much the same steps as in the previous network.</p>
+<pre class="r"><code>y &lt;- m %&gt;% 
+    acast(Authors~item, value.var=&quot;occur&quot;, fun.aggregate = sum)
+co &lt;- y %*% t(y)
+co[1:3, 1:3]</code></pre>
+<pre><code>##           Adger D. Annis J. Arnold D.
+## Adger D.         1        0         0
+## Annis J.         0        1         0
+## Arnold D.        0        0         1</code></pre>
+<pre class="r"><code>g &lt;- graph.adjacency(co, weighted=TRUE, mode =&#39;undirected&#39;)
+g &lt;- simplify(g)
+V(g)$label &lt;- gsub(&quot; &quot;, &quot;\n&quot;, V(g)$name)
+deg &lt;- degree(g)</code></pre>
+<pre class="r"><code>plot(g,
+     layout = layout_with_kk(g),
+     edge.width = E(g)$weight,
+     edge.color = adjustcolor(&quot;dodgerblue1&quot;, .7),
+     vertex.color = adjustcolor(&quot;white&quot;, .8),
+     vertex.frame.color=adjustcolor(&quot;dodgerblue4&quot;, .4),
+     vertex.size=1.9,
+     vertex.label.family = &quot;Helvetica&quot;,
+     vertex.label.font=1,
+     vertex.label.cex = sqrt(1+deg)/5,
+     vertex.label.color = &quot;black&quot;,
+     main = &quot;The Bayesians of Psychonomic Society&quot;)</code></pre>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-ii_files/figure-html/unnamed-chunk-27-1.png" width="768" /></p>
+<p>That’s it!</p>
+</div>

@@ -1,0 +1,151 @@
+---
+author: "Matti Vuorre"
+categories: ["statistics"]
+date: 2017-01-19
+draft: false
+tags: ["R", "data visualization", "bayes", "brms"]
+title: "Better forest plots from meta-analytic models estimated with brms"
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 2
+summary: "An R function for drawing forest plots from meta-analytic models estimated with the brms R package."
+---
+
+
+<div id="TOC">
+<ul>
+<li><a href="#example-data">Example data</a></li>
+<li><a href="#fit-meta-analytic-model-with-brms">Fit meta-analytic model with brms</a></li>
+<li><a href="#draw-forest-plots-with-forest">Draw forest plots with forest()</a><ul>
+<li><a href="#arguments">Arguments</a></li>
+<li><a href="#customizing-the-plot">Customizing the plot</a></li>
+</ul></li>
+<li><a href="#credits">Credits</a></li>
+<li><a href="#conclusion">Conclusion</a></li>
+</ul>
+</div>
+
+<p>Hi all! After our <a href="https://mvuorre.github.io/post/2016/2016-09-29-bayesian-meta-analysis/">previous discussion about how to estimate meta-analytic models</a> with the brilliant <a href="https://cran.r-project.org/package=brms"><strong>brms</strong></a> R package, a few people asked me for the code to produce the forest plots. Here I’ll present a much better version of a function to produce forest plots from meta-analytic models estimated with brms. The function is implemented in <a href="https://cran.r-project.org/package=ggplot2"><strong>ggplot2</strong></a>, and it is included in the <a href="https://mvuorre.github.io/brmstools/index.html">brmstools</a> package, available on github:</p>
+<pre><code>devtools::install_github(&quot;mvuorre/brmstools&quot;)</code></pre>
+<p>The function to draw forest plots from meta-analytic models estimated with brms is called <code>forest()</code>, and you can learn more about it with <code>?forest</code>.</p>
+<div id="example-data" class="section level1">
+<h1>Example data</h1>
+<p>We’ll illustrate the plot using example data from the <a href="https://cran.r-project.org/package=metafor"><strong>metafor</strong></a> package. This data are “Results from 48 studies on the effectiveness of school-based writing-to-learn interventions on academic achievement.”</p>
+<blockquote>
+<p>“In each of the studies included in this meta-analysis, an experimental group (i.e., a group of students that received instruction with increased emphasis on writing tasks) was compared against a control group (i.e., a group of students that received conventional instruction) with respect to some content-related measure of academic achievement (e.g., final grade, an exam/quiz/test score). The effect size measure for this meta-analysis was the standardized mean difference (with positive scores indicating a higher mean level of academic achievement in the intervention group).” (From the metafor help page <code>?dat.bangertdrowns2004</code>.)</p>
+</blockquote>
+<pre class="r"><code>data(&quot;dat.bangertdrowns2004&quot;, package = &quot;metafor&quot;)
+head(dat.bangertdrowns2004)</code></pre>
+<pre><code>##   id   author year grade length minutes wic feedback info pers imag meta
+## 1  1 Ashworth 1992     4     15      NA   1        1    1    1    0    1
+## 2  2    Ayers 1993     2     10      NA   1       NA    1    1    1    0
+## 3  3   Baisch 1990     2      2      NA   1        0    1    1    0    1
+## 4  4    Baker 1994     4      9      10   1        1    1    0    0    0
+## 5  5   Bauman 1992     1     14      10   1        1    1    1    0    1
+## 6  6   Becker 1996     4      1      20   1        0    0    1    0    0
+##         subject  ni    yi    vi
+## 1       Nursing  60  0.65 0.070
+## 2 Earth Science  34 -0.75 0.126
+## 3          Math  95 -0.21 0.042
+## 4       Algebra 209 -0.04 0.019
+## 5          Math 182  0.23 0.022
+## 6    Literature 462  0.03 0.009</code></pre>
+<p>We’ll only need a few of the columns, and with specific names, so in the following we’ll just select the relevant variables and and create labels for the plot by pasting together the studies <code>author</code> and <code>year</code> columns. I’ll also subset the data to the first 15 studies, because the original data has 48 studies and that would make the plot very large (which is fine, but it’s simpler to start small.)</p>
+<pre class="r"><code>library(dplyr)
+d &lt;- dat.bangertdrowns2004 %&gt;%
+    mutate(study = paste0(author, &quot; (&quot;, year, &quot;)&quot;), sei = sqrt(vi)) %&gt;%
+    select(study, yi, sei) %&gt;% 
+    slice(1:15)
+d</code></pre>
+<pre><code>##                 study    yi        sei
+## 1     Ashworth (1992)  0.65 0.26457513
+## 2        Ayers (1993) -0.75 0.35496479
+## 3       Baisch (1990) -0.21 0.20493902
+## 4        Baker (1994) -0.04 0.13784049
+## 5       Bauman (1992)  0.23 0.14832397
+## 6       Becker (1996)  0.03 0.09486833
+## 7  Bell &amp; Bell (1985)  0.26 0.32557641
+## 8      Brodney (1994)  0.06 0.08366600
+## 9       Burton (1986)  0.06 0.20000000
+## 10   Davis, BH (1990)  0.12 0.22803509
+## 11   Davis, JJ (1996)  0.77 0.32710854
+## 12         Day (1994)  0.00 0.14491377
+## 13     Dipillo (1994)  0.52 0.19235384
+## 14     Ganguli (1989)  0.54 0.28809721
+## 15  Giovinazzo (1996)  0.20 0.29325757</code></pre>
+</div>
+<div id="fit-meta-analytic-model-with-brms" class="section level1">
+<h1>Fit meta-analytic model with brms</h1>
+<p>Fitting the meta-analytic model is <strong>easy</strong> with brms! The formula specifies the study-specific effect size and standard error, an overall intercept (<code>1</code>), and the “random studies” (<code>(1|study)</code>). I’ll use four cores for speed and increase the <code>adapt_delta</code> parameter to avoid divergent transitions.</p>
+<pre class="r"><code>library(brms)
+mod &lt;- brm(
+  yi | se(sei) ~ 1 + (1|study), 
+  family = gaussian(),
+  data = d, 
+  cores = 4, 
+  control = list(adapt_delta=.95),
+  file = here::here(&quot;static/data/metaanalysismodel&quot;)
+)</code></pre>
+<p>The model summary shows a 95% CI for the average effect hugging 0, and reasonable between-study heterogeneity (<code>sd(Intercept)</code>):</p>
+<pre class="r"><code>summary(mod)</code></pre>
+<pre><code>##  Family: gaussian 
+##   Links: mu = identity; sigma = identity 
+## Formula: yi | se(sei) ~ 1 + (1 | study) 
+##    Data: d (Number of observations: 15) 
+## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup samples = 4000
+## 
+## Group-Level Effects: 
+## ~study (Number of levels: 15) 
+##               Estimate Est.Error l-95% CI u-95% CI Eff.Sample Rhat
+## sd(Intercept)     0.17      0.11     0.01     0.41        946 1.00
+## 
+## Population-Level Effects: 
+##           Estimate Est.Error l-95% CI u-95% CI Eff.Sample Rhat
+## Intercept     0.13      0.07    -0.01     0.28       1447 1.00
+## 
+## Samples were drawn using sampling(NUTS). For each parameter, Eff.Sample 
+## is a crude measure of effective sample size, and Rhat is the potential 
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+</div>
+<div id="draw-forest-plots-with-forest" class="section level1">
+<h1>Draw forest plots with forest()</h1>
+<p>The user only needs to enter a data frame and a brms model:</p>
+<pre class="r"><code>library(brmstools)
+forest(mod)</code></pre>
+<p><img src="/post/2017-01-19-better-brms-forest-plots_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>The forest plot shows, on the left, the names of the studies. On the very right are the effect sizes, [and limits of the Credible Intervals]. The CI limits are by default 95%, but users can control this by passing the argument <code>level = .80</code>, for 80% CIs, for example.</p>
+<p>In the middle are the posterior distributions of the estimated effect sizes as grey densities. The black circle indicates the posterior mean, and the arms extending from the point are the CI defined by <code>level</code> (here, 95% CI). The bottom row, ME, is the meta-analytic estimate.</p>
+<div id="arguments" class="section level2">
+<h2>Arguments</h2>
+<p><code>forest()</code> has several arguments that impact the resulting plot, see <code>?forest</code> for details. For example</p>
+<pre class="r"><code>forest(
+    model = mod, 
+    show_data = TRUE,  # Shows data means and SEs
+    sort = FALSE,  # Don&#39;t sort estimates based on their magnitude
+    fill_ridge = &quot;dodgerblue&quot;)  # Fill densities with blue</code></pre>
+<p><img src="/post/2017-01-19-better-brms-forest-plots_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>Here, the plot also shows the observed effect size (black stars) from the data. This plot nicely shows how the random effects model shrinks the estimates toward the group mean, especially for studies that had wide SEs to begin with.</p>
+</div>
+<div id="customizing-the-plot" class="section level2">
+<h2>Customizing the plot</h2>
+<p><code>forest()</code> returns a ggplot2 object, which is customizable by regular ggplot2 functions (themes, scales…) Here, we’ll add limits to the x axis manually and use another theme:</p>
+<pre class="r"><code>library(ggplot2)
+myplot &lt;- forest(model = mod)
+myplot + 
+    scale_x_continuous(&quot;Standardized ES&quot;, limits = c(-1.2, 1.2)) +
+    theme_bw()</code></pre>
+<p><img src="/post/2017-01-19-better-brms-forest-plots_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+</div>
+</div>
+<div id="credits" class="section level1">
+<h1>Credits</h1>
+<p>The function uses the excellent <a href="https://github.com/clauswilke/ggridges">ggridges</a> package.</p>
+</div>
+<div id="conclusion" class="section level1">
+<h1>Conclusion</h1>
+<p>Look at how non-normal some of those posterior densities look like! It seems that in this case, the posterior mean can be quite a misleading point estimate, and actually showing the posterior distribution is a very good idea.</p>
+<p>Hope you’ll find this function useful. If you’d like it to be improved, let me know. Thanks and have a good day!</p>
+</div>

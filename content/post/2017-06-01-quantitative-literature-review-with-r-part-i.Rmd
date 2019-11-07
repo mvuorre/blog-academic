@@ -1,0 +1,157 @@
+---
+title: 'Quantitative literature review with R: Exploring Psychonomic Society Journals,
+  Part I'
+author: Matti Vuorre
+date: '2017-06-01'
+slug: quantitative-literature-review-with-r-part-i
+categories:
+  - data science
+tags:
+  - data visualization
+  - R
+  - tutorial
+  - dplyr
+  - ggplot2
+  - psychology
+  - psychonomic society
+draft: no
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 2
+summary: "In this tutorial, I'll show how to use [R](https://www.r-project.org/) to quantitatively explore, analyze, and visualize a research literature, using [Psychonomic Society's](http://www.psychonomic.org/) publications"
+---
+
+```{r setup, include=F}
+library(knitr)
+opts_chunk$set(warning = F, message = F, cache = T)
+library(tidyverse)
+theme_set(
+  theme_linedraw() +
+    theme(panel.grid.major = element_blank(),
+          axis.text.y = element_text(hjust = 1), 
+          strip.text = theme_bw()$strip.text,
+          legend.position = "bottom")
+)
+```
+
+Literature reviews, both casual and formal (or qualitative / quantitative), are an important part of research. In this tutorial, I'll show how to use [R](https://www.r-project.org/) to quantitatively explore, analyze, and visualize a research literature, using [Psychonomic Society's](http://www.psychonomic.org/) publications between 2005 and 2016. 
+
+Commonly, literature reviews are rather informal; you read a review paper or 10, maybe suggested to you by experts in the field, and then delve deeper into the topics presented in those papers. A more formal version starts with a database search, where you try out various search terms, and collect a more exhaustive list of publications related to your research questions. Here, we are going to have a bit of fun and explore a large heterogeneous literature (kind of) quantitatively, focusing on data manipulation (not the bad kind!) and visualization.
+
+# The dataset
+
+I'll be using data from the psychLit R package:
+
+```{r}
+library(psychLit)
+d <- psychLit
+```
+
+Let's first load all the relevant R packages that we'll use to do our work for us:
+
+```{r}
+library(tidyverse)
+library(stringr)
+```
+
+Here, we limit the investigation to Psychonomic Society journals:
+
+```{r}
+(journals <- unique(d$`Source title`))
+d <- filter(d, `Source title` %in% journals[c(3, 4, 7, 17, 18, 23)])
+```
+
+# Univariate figures
+
+This data is very rich, but for this initial exploration, we'll be focusing on simple uni- and bi-variate figures. In later parts of this tutorial (future blog posts), we'll start visualizing more complex data, such as keywords, authors, and networks.
+
+Let's begin with some simple summaries of what's been going on, over time, for each journal. We'll make extensive use of the [dplyr data manipulation verbs](http://dplyr.tidyverse.org/articles/dplyr.html) in the following plots. Take a look at the linked website if they are unfamiliar to you; although I will explain more complicated cases, I won't bother with every detail.
+
+## Publication years
+
+First, we're interested in a simple question: How many articles has each journal published in each year? Are there temporal patterns, and do they differ between journals? The steps for creating this plot are commented in the code below. Roughly, in order of appearance, we first add grouping information to the data frame, then summarise the data on those groups, create a new column for a publication-level summary, and then order the publications on it. We then pass the results to ggplot2 and draw a line and point graph.
+
+```{r}
+d %>% 
+    group_by(`Source title`, Year) %>% 
+    summarise(n = n()) %>%  # For each group (Publication, Year), count nobs
+    mutate(nsum = sum(n)) %>%  # For each Publication, sum of nobs {1}
+    ungroup() %>%  # Ungroup data frame
+    mutate(`Source title` = reorder(`Source title`, nsum)) %>%  # {2}
+    ggplot(aes(x=Year, y=n)) +
+    geom_point() +
+    geom_line() +
+    labs(y = "Number of articles published") +
+    facet_wrap("`Source title`", ncol=2)
+```
+
+The code in `{1}` works, because the `summarise()` command in the above line ungroups the last grouping factor assigned by `group_by()`. And since I called `mutate()` instead of summarise, the sum of number of observations was added to each row, instead of collapsing the data by group. `{2}` made the `Source title` variable into a factor that's ordered by the sum of articles across years for that journal; this ordering is useful because when I used `facet_wrap()` below, the panels are nicely ordered (journals with fewer total papers in the upper left, increasing toward bottom right.)
+
+If this code doesn't make any sense, I strongly recommend loading the data into your own R workspace, and executing the code line by line.
+
+I'm a little surprised at the relative paucity of articles in Learning and Behavior, and it looks like there might be some upward trajectory going on in PBR. Should I run some regressions? Probably not.
+
+## Citations
+
+Let's look at numbers of citations next. For these, simple histograms will do, and we expect to see some heavy tails. I will pre-emptively clip the x-axis at 100 citations, because there's probably a few rogue publications with a truly impressive citation count, which might make the other, more common, values less visible.
+
+```{r}
+d %>% 
+    ggplot(aes(`Cited by`)) +
+    geom_histogram(binwidth=1, col="black") +
+    coord_cartesian(xlim=c(0,100)) +
+    facet_wrap("`Source title`", ncol=2)
+```
+
+Nice. But how many papers are there with more than 100 citations? What's the proportion of those highly cited papers?
+
+```{r}
+d %>%
+    group_by(`Source title`) %>%
+    mutate(total = n()) %>% 
+    filter(`Cited by` > 100) %>% 
+    summarise(total = unique(total),
+              over_100 = n(),
+              ratio = signif(over_100/total, 1)) %>% 
+    arrange(total)
+```
+
+Excellent. We have now reviewed some of the powerful dplyr verbs and are ready for slightly more complex summaries of the data.
+
+# Bivariate figures
+
+## Publication year and citations
+
+We can visualize publication counts over years of publication, but this might not be the most informative graph (because recent articles naturally can't be as often cited as older ones.) Here, I'll show how to plot neat box plots (without outliers) with ggplot2:
+
+```{r}
+d %>% 
+    filter(`Cited by` < 100) %>% 
+    ggplot(aes(Year, `Cited by`)) +
+    geom_boxplot(aes(group = Year), outlier.color = NA) +
+    facet_wrap("`Source title`", ncol=2, scales = "free")
+```
+
+## Pages and citations
+
+The last figure for today is a scatterplot of pages (how many pages the article spans) versus number of citations. For scatterplots I usually prefer empty points (`shape=1`).
+
+```{r}
+d %>% 
+    filter(`Page count` < 100, `Cited by` < 100) %>% 
+    ggplot(aes(`Page count`, `Cited by`)) +
+    geom_point(shape=1) +
+    facet_wrap("`Source title`", ncol=2)
+```
+
+# Summary 
+
+We have now scratched the surface of these data, and there is clearly a lot to explore:
+
+```{r}
+glimpse(d)
+```
+
+In next posts on this data, we'll look at networks and other more advanced topics. Stay tuned.

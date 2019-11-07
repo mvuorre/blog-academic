@@ -1,0 +1,357 @@
+---
+title: 'Quantitative literature review with R: Exploring Psychonomic Society Journals,
+  Part II'
+author: Matti Vuorre
+date: '2017-06-02'
+slug: quantitative-literature-review-with-r-part-ii
+categories:
+  - data science
+tags:
+  - R
+  - tutorial
+  - data visualization
+  - dplyr
+  - ggplot2
+  - psychology
+  - psychonomic society
+draft: no
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 2
+summary: "In this tutorial, I'll show how to use R to quantitatively explore, analyze, and visualize a research literature, using Psychonomic Society publications. This post directly continues from [part I of Quantitative literature review with R](https://mvuorre.github.io/post/2017/quantitative-literature-review-with-r-part-i/). Please read that first for context. Part I focused on data cleaning and simple figures, but here we will look at relational data by visualizing some network structures in the data. "
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(warning = F, message = F, cache = T)
+library(tidyverse)
+theme_set(
+  theme_linedraw() +
+    theme(panel.grid.major = element_blank(),
+          axis.text.y = element_text(hjust = 1), 
+          strip.text = theme_bw()$strip.text,
+          legend.position = "bottom")
+)
+```
+
+(This post directly continues from [part I of Quantitative literature review with R](https://mvuorre.github.io/post/2017/quantitative-literature-review-with-r-part-i/). Please read that first for context.) In this tutorial, I'll show how to use R to quantitatively explore, analyze, and visualize a broad research literature, using all Psychonomic Society publications between 2004 and 2016. Part I focused on data cleaning and simple figures, but here we will look at relational data by visualizing some network structures in the data. 
+
+We'll be working with R, so if you want to follow along on your own computer, fire up R and load up the required R packages:
+
+```{r}
+library(tidyverse)
+library(stringr)
+```
+
+The data is contained in the [psychLit](https://github.com/mvuorre/psychLit/) R package:
+
+```{r}
+library(psychLit)
+d <- psychLit
+```
+
+As before, we limit the investigation to Psychonomic Society journals:
+
+```{r}
+(journals <- unique(d$`Source title`))
+d <- filter(d, `Source title` %in% journals[c(3, 4, 7, 17, 18, 23)])
+```
+
+We've got data on quite a few variables which we could imagine are interconnected, such as Tags (`Keywords`), `Authors`, and the articles themselves (through the `References` variable). 
+
+```{r}
+glimpse(d)
+```
+
+Let's begin by looking at the articles' Keywords.
+
+# Tags
+
+These are the things that you have to choose to describe your article when you submit it for publication. They are called Keywords in the data, but I'm going to refer to them as Tags for brevity. Also, I will only work with the `Author Keywords`, because it seems like Scopus's automatic index keywords are mostly nonsense or missing. 
+
+So our first operation is to rename the `Author Keywords` variable to `Tags`, and get rid of the automatic keywords altogether.
+
+```{r}
+d <- rename(d, Tags = `Author Keywords`) %>% 
+    select(-`Index Keywords`)
+```
+
+Before moving on to networks, let's take a look at what these tags are like: How many are there? Do people use them consistently?
+
+## Exploring univariate tags
+
+Our first goal is to simply visualize the most common tags. However, recall that the `Tags` variable in the data is quite messy:
+
+```{r, echo = F}
+d %>% 
+    select(Tags) %>% 
+    slice(1:3)
+```
+
+Each value of `Tags` is a kind of a list, whose individual items are separated by semicolons. What we'd like to have is a variable (column in a data frame) where every item is a single tag, so we need to do some kind of a data unwrapping operation.
+
+The unwrapping can be done by simply splitting the `Tags` variable on each semicolon (and space) found in each string, but this creates a strange variable:
+
+```{r}
+d %>% 
+    select(Tags) %>% 
+    mutate(Tags = str_split(Tags, "; ")) 
+```
+
+This is where things get really interesting. A few lines above, we conceptualized each value (cell) of `Tags` as a sort of a list. We have now operationalized that idea by creating a `Tags` variable that is an R **list-column**, meaning that each cell can contain a complex R object. Here, each value is a list of character values. To make this notion concrete, look at the first row (`slice(1)`) of the Tags variable (`.$Tags`, `.` is a placeholder of the data being passed by `%>%` arrows) by using the familiar `str()` function:
+
+```{r}
+d %>% 
+    select(Tags) %>% 
+    mutate(Tags = str_split(Tags, "; ")) %>% 
+    slice(1) %>% 
+    .$Tags %>%  str()
+```
+
+All the tags associated with the first article in our data frame are in a neat list of neat character strings. Brilliant. This data format is quite foreign to us who are used to working with strictly flat rectangular data, but has a certain recursive beauty to it. Now that our list is concrete, we can unlist it to create a Tags variable whose each row is one individual tag.
+
+```{r}
+d %>% 
+    select(Tags) %>% 
+    mutate(Tags = str_split(Tags, "; ")) %>% 
+    unnest(Tags)
+```
+
+Excellent! This data frame has one variable, `Tags`, where each observation is an individual tag. Now we can go ahead and count and summarise the tags. From here onwards, it's all [regular dplyr verbs](http://dplyr.tidyverse.org/articles/dplyr.html):
+
+```{r}
+d %>% 
+    select(Tags) %>% 
+    mutate(Tags = str_split(Tags, "; ")) %>% 
+    unnest(Tags) %>% 
+    filter(!is.na(Tags)) %>%  # Remove missing observations
+    group_by(Tags) %>%  # Group by unique Tags
+    count() %>%  # And count them
+    ungroup() %>% 
+    top_n(40) %>%  # Choose n most numerous Tags
+    mutate(Tags = reorder(Tags, n)) %>%  # {1}
+    ggplot(aes(n, Tags)) +
+    geom_point() +
+    geom_segment(aes(xend = 0, yend=Tags)) +
+    scale_x_continuous(limits = c(0, 400), expand = c(0, 0)) +
+    labs(x="Number of articles", y="",
+         subtitle = "Top 30 tags in Psychonomics Journals",
+         caption = "Data for years 2004-2016 only")
+```
+
+`{1}` reordered the `Tags` so that they are nicely ordered in the figure on the `n` variable. You could also do a wordcloud with these data, but I think I'll refrain this time. Instead, what I'll do is explore popular tags by journal. The "pipeline" to get tags by journal is almost identical, except that we'll keep the `Publication` variable in the data.
+
+The following code is a little more complicated than is required for a simple plot, but I wanted to order the `Tags` inside each publication, which [required a little bit of extra work](https://drsimonj.svbtle.com/ordering-categories-within-ggplot2-facets) as described by @[drsimonj](https://twitter.com/drsimonj). Below, I'll work with journal abbreviations.
+
+```{r}
+pd <- d %>% 
+    select(`Abbreviated Source Title`, Tags) %>% 
+    mutate(Tags = str_split(Tags, "; ")) %>% 
+    unnest(Tags) %>% 
+    filter(!is.na(Tags)) %>%
+    group_by(`Abbreviated Source Title`, Tags) %>%  # Group by unique Tags AND journals
+    count() %>%  # And count them
+    group_by(`Abbreviated Source Title`) %>% 
+    top_n(10, n) %>%  # Select top 10 tags within each journal
+    ungroup() %>% 
+    arrange(`Abbreviated Source Title`, n) %>%  # Arrange by n within journals
+    mutate(order = row_number())  # Will order Tags on this
+pd
+```
+
+That was more complicated than usual, so I wanted to print out the intermediate result as well. We can now use it to plot:
+
+```{r}
+pd %>%     
+    ggplot(aes(n, order)) +
+    geom_point() +
+    geom_segment(aes(xend = 0, yend=order)) +
+    scale_y_continuous(breaks = pd$order, labels = pd$Tags) +
+    scale_x_continuous(expand = c(0.02, 0)) +
+    labs(x="Number of articles", y="",
+         subtitle = "Top 10 tags within 6 Psychonomics Journals",
+         caption = "Data for years 2004-2016 only") +
+    facet_wrap("`Abbreviated Source Title`", scales="free", ncol=2)
+```
+
+Finally, let's look at the overall distribution of the tags as a histogram:
+
+```{r, echo=F}
+d %>% 
+    select(Tags) %>% 
+    mutate(Tags = str_split(Tags, "; ")) %>% 
+    unnest(Tags) %>% 
+    filter(!is.na(Tags)) %>%  # Remove missing observations
+    group_by(Tags) %>%  # Group by unique Tags
+    count() %>% 
+    ggplot(aes(n)) +
+    geom_histogram(binwidth=1) +
+    coord_cartesian(xlim = c(0,100), ylim = c(0,250), expand=0) +
+    labs(caption = "Axes are clipped to show the bulk of the distribution.")
+```
+
+There are about 8000 unique Tags, and about 7000 of them occur fewer than three times in the corpus. Now that we have some idea of what kinds of tags there are in the data, roughly what their distributions might look like, and how they vary across the journals, we are ready to look at networks of tags. 
+
+# Network analysis of Tags   
+
+Network analysis (or graph analysis) is a vast and complicated area, and my graph analysis skills are a little rusty. So here we'll simply illustrate how to format the data in an appropriate way, and draw a few example graphs. I referred to [this website](http://kateto.net/network-visualization) more than once while working on this (also thanks to @[jalapic](https://twitter.com/jalapic) for tips).
+
+The first graph will be about `Tags`. We'll try to illustrate how and which tags co-occur within articles in the Psychonomic Society journals between 2004 and 2016. 
+
+90% of data analysis is data cleaning and manipulation, and network analysis is no exception. The first data manipulation step is to create an adjacency matrix where each row and column is a tag, where the values in the cells are the number of times those tags co-occurred (were present in the same article.) I found [this stack overflow answer](http://stackoverflow.com/a/13281606/4087279) and [this blogpost](http://varianceexplained.org/r/love-actually-network/) helpful when preparing the data.
+
+## Preparing the adjacency matrix
+
+In order to create the adjacency matrix we need to solve a sequence of smaller problems. First, we'll take two columns from the data, one for `Tags` and another one that uniquely identifies each article (doesn't matter what it is, here we use a created variable called `item`). Then we unnest the Tags into single tags per row as detailed above, and remove empty tags.
+
+```{r}
+m <- d %>% 
+    rownames_to_column("item") %>% 
+    select(Tags, item) %>% 
+    mutate(Tags = str_split(Tags, "; ")) %>% 
+    unnest(Tags) %>% 
+    filter(!is.na(Tags))
+m
+```
+
+Next, I remove all tags from the data that occurred fewer than a couple of times, because otherwise the data would be too large and messy.
+
+```{r}
+m <- group_by(m, Tags) %>% 
+    mutate(n = n()) %>% 
+    filter(n > 8) %>% 
+    ungroup() %>% 
+    select(-n)
+```
+
+Next, we need a variable that identifies whether the tag occurred in the article or not:
+
+```{r}
+m$occur <- 1
+slice(m, 1:2)
+```
+
+Note that `occur` must be one. To create the matrix we need *all* the item-tag pairs, even ones that didn't occur. For these pairs, `occur` will be zero. The tidyr package in tidyverse provides the perfect helper function for this purpose: 
+
+```{r}
+m <- m %>% 
+    complete(item, Tags, fill = list(occur=0))
+m
+```
+
+Now we have a data frame with `r nrow(m)` rows; each row signifying a possible article - Tag co-occurrence.  Most `occur`s will, of course, be zero. 
+
+Now we can create the co-occurrence matrix. We first spread Tags over the columns, such that each column is a unique tag, each row is an article, and the cell values are occurrences.
+
+```{r, echo = -5}
+library(reshape2)
+y <- m %>% 
+    acast(Tags~item, value.var="occur", fun.aggregate = sum)
+y[1:2, 1:2]
+y[y>1] <- 1  # Remove duplicates
+```
+
+All we need to do then is to make a symmetric matrix where both rows and columns are Tags, and the cell values are numbers of co-occurrences. So we matrix multiply `y` with its transpose:
+
+```{r}
+co <- y %*% t(y)
+co[1:3, 1:3]
+```
+
+## Visualizing the adjacency matrix
+
+It's important to understand what `co` is; it's a symmetric matrix whose rows and columns are tags, and their co-occurrences are numerically represented at their intersections. For example, Action and 3-D perception never co-occurred in the data, but Adaptation and 3-D percetion co-occurred once. We are now in an excellent position to investigate what tags tend to co-occur.
+
+First, let's use igraph to create the graph object `g`, and take out some unnecessary information from it.
+
+```{r}
+library(igraph)
+g <- graph.adjacency(co, weighted=TRUE, mode ='undirected')
+g <- simplify(g)
+```
+
+`g` is now an igraph R object that contains edges and vertices, and information about them. For example, we can use `V(g)$name` to look at the Vertice names. Some of these are quite long, so I'll create another variable for each Vertice, called `label`, which is the name, but replacing each space with a newline character. This will make some of the graphs prettier.
+
+```{r}
+V(g)$label <- gsub(" ", "\n", V(g)$name)
+```
+
+Networks are very complicated visualizations, and if you simply call `plot(g)`, you'll get an ugly mess of a figure:
+
+```{r}
+plot(g)
+```
+
+There are more parameters to the `plot()` command than can be listed here, but I tried out a few different options, and this is what I ended up with:
+
+```{r, fig.height=9, fig.width=9}
+plot(g,
+     layout = layout_on_sphere(g),
+     edge.width = E(g)$weight/7,
+     edge.color = adjustcolor("dodgerblue1", .7),
+     vertex.color = adjustcolor("white", .8),
+     vertex.frame.color=adjustcolor("dodgerblue4", .4),
+     vertex.size=1.9,
+     vertex.label.family = "Helvetica",
+     vertex.label.font=1,
+     vertex.label.cex=.75,
+     vertex.label.color="black",
+     vertex.label = ifelse(degree(g) > 35, V(g)$label, NA))
+```
+
+# The Bayes Network
+
+The next network will be fairly involved. Our goal is to visualize the prominence and connectedness of Psychonomic Society's "Bayesians". Who are these Bayesians, you might ask? Our definition here is simply: "An author who has published one or more articles in Psychonomic Journals (2004 - 2016) where the keywords contained the word 'Bayes'." This is obviously suboptimal because someone might have published an article called "Why I'm not a Bayesian", yet they would be included in this graph, but we'll go with this for now.
+
+I'll let the code speak for itself this time. If it is impossible to parse, I recommend downloading the data (see top of post) to your own computer and running the code yourself.
+
+```{r}
+m <- d %>% 
+    rownames_to_column("item") %>% 
+    select(Authors, Tags, item) %>% 
+    mutate(Authors = str_split(Authors, ", ")) %>% 
+    unnest(Authors) %>% 
+    filter(!is.na(Tags), !is.na(Authors)) %>% 
+    filter(grepl("bayes", Tags, ignore.case = T))
+m$occur <- 1
+m <- m %>% 
+    complete(item, Authors, fill = list(occur=0)) %>% 
+    select(-Tags)
+m
+```
+
+In these data, we have simply counted whether an author "occurred" in an article, and only included articles whose `Tags` included the word "bayes" in any shape or form. This network will therefore visualize the connectedness of "Bayesian", as in who has published papers with whom.
+
+We can then re-run pretty much the same steps as in the previous network.
+
+```{r}
+y <- m %>% 
+    acast(Authors~item, value.var="occur", fun.aggregate = sum)
+co <- y %*% t(y)
+co[1:3, 1:3]
+```
+
+```{r}
+g <- graph.adjacency(co, weighted=TRUE, mode ='undirected')
+g <- simplify(g)
+V(g)$label <- gsub(" ", "\n", V(g)$name)
+deg <- degree(g)
+```
+
+```{r, fig.height=8, fig.width=8}
+plot(g,
+     layout = layout_with_kk(g),
+     edge.width = E(g)$weight,
+     edge.color = adjustcolor("dodgerblue1", .7),
+     vertex.color = adjustcolor("white", .8),
+     vertex.frame.color=adjustcolor("dodgerblue4", .4),
+     vertex.size=1.9,
+     vertex.label.family = "Helvetica",
+     vertex.label.font=1,
+     vertex.label.cex = sqrt(1+deg)/5,
+     vertex.label.color = "black",
+     main = "The Bayesians of Psychonomic Society")
+```
+
+That's it!

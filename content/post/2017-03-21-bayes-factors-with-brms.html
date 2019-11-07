@@ -1,0 +1,422 @@
+---
+title: Bayes Factors with brms
+author: Matti Vuorre
+date: '2017-03-21'
+slug: bayes-factors-with-brms
+categories:
+  - statistics
+tags:
+  - bayes
+  - R
+  - tutorial
+  - brms
+draft: no
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: true
+    toc_depth: 1
+summary: "How to calculate Bayes Factors with the R package brms (Buerkner, 2016) using the Savage-Dickey density ratio method (Wagenmakers, Lodewyckx, Kuriyal, & Grasman, 2010)."
+---
+
+
+<div id="TOC">
+<ul>
+<li><a href="#example-0"><span class="toc-section-number">1</span> Example 0</a></li>
+<li><a href="#example-1-equality-of-proportions"><span class="toc-section-number">2</span> Example 1: Equality of Proportions</a></li>
+<li><a href="#example-2-hierarchical-bayesian-one-sample-proportion-test"><span class="toc-section-number">3</span> Example 2: Hierarchical Bayesian one-sample proportion test</a></li>
+<li><a href="#conclusion"><span class="toc-section-number">4</span> Conclusion</a></li>
+<li><a href="#references"><span class="toc-section-number">5</span> References</a></li>
+<li><a href="#appendix"><span class="toc-section-number">6</span> Appendix</a></li>
+</ul>
+</div>
+
+<p>Here’s a short post on how to calculate Bayes Factors with the R package <strong>brms</strong> (Buerkner, 2016) using the Savage-Dickey density ratio method (Wagenmakers, Lodewyckx, Kuriyal, &amp; Grasman, 2010).</p>
+<p>To get up to speed with what the Savage-Dickey density ratio method is–or what Bayes Factors are–please read Wagenmakers et al. 2010. (The paper is available on the <a href="http://www.ejwagenmakers.com/2010/WagenmakersEtAlCogPsy2010.pdf">author’s webpage</a>.) Here, I’ll only show the R &amp; brms code to do the calculations that Wagenmakers et al. (2010) discuss. In their paper, they used WinBUGS, which requires quite a bit of code to sample from even a relatively simple model. brms on the other hand uses the familiar R formula syntax, making it easy to use. brms also does the MCMC sampling with Stan (Stan Development Team, 2016a &amp; 2016b), or rather creates Stan code from a specified R model formula by what can only be described as string processing magic, making the sampling very fast. Let’s get straight to the examples in Wagenmakers et al. (2010)</p>
+<pre class="r"><code># We&#39;ll work in tidyverse
+library(tidyverse)</code></pre>
+<div id="example-0" class="section level1">
+<h1><span class="header-section-number">1</span> Example 0</h1>
+<p>Wagenmakers and colleagues begin with a simple example of 10 true/false questions: We observe a person answering 9 (s) out of 10 (k) questions correctly.</p>
+<pre class="r"><code>d &lt;- data.frame(s = 9, k = 10)
+d</code></pre>
+<pre><code>##   s  k
+## 1 9 10</code></pre>
+<p>We are interested in the person’s latent ability to answer similar questions correctly. This ability is represented by <span class="math inline">\(\theta\)</span> (theta), which for us will be the probability parameter (sometimes also called the rate parameter) in a binomial distribution. See Wagenmakers et al. (2010) for formulas. The maximum likelihood (point) estimate for <span class="math inline">\(\theta\)</span> is n/k, the proportion .9.</p>
+<p>The first thing we’ll need to specify with respect to our statistical model is the prior probability distribution for <span class="math inline">\(\theta\)</span>. As in Wagenmakers et al. 2010, we specify a uniform prior, representing no prior information about the person’s ability to aswer the questions. For the binomial probability parameter, <span class="math inline">\(Beta(\alpha = 1, \beta = 1)\)</span> is a uniform prior.</p>
+<pre class="r"><code>pd &lt;- tibble(
+    x = seq(0, 1, by = .01),
+    Prior = dbeta(x, 1, 1)
+    )
+
+ggplot(pd, aes(x, Prior)) +
+    geom_line() +
+    coord_cartesian(xlim = 0:1, ylim = c(0, 6), expand = 0) +
+    labs(y = &quot;Density&quot;, x = bquote(theta))</code></pre>
+<p><img src="/post/2017-03-21-bayes-factors-with-brms_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>The solid line represents the probability density assigned to values of <span class="math inline">\(\theta\)</span> by this prior probability distribution. You can see that it is 1 for all possible parameter values: They are all equally likely a priori. For this simple illustration, we can easily calculate the posterior distribution by adding the number of correct and incorrect answers to the parameters of the prior Beta distribution.</p>
+<pre class="r"><code>pd$Posterior &lt;- dbeta(pd$x, 10, 2)
+pdw &lt;- gather(pd, key=Type, value=density, Prior:Posterior)
+ggplot(pdw, aes(x, density, col=Type)) +
+    geom_line() +
+    annotate(&quot;point&quot;, x=c(.5, .5), y = c(pdw$density[pdw$x==.5])) +
+    annotate(&quot;label&quot;, x=c(.5, .5), 
+             y = pdw$density[pdw$x==.5], 
+             label = round(pdw$density[pdw$x==.5], 3),
+             vjust=-.5)</code></pre>
+<p><img src="/post/2017-03-21-bayes-factors-with-brms_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>The Savage-Dickey density ratio is calculated by dividing the posterior density by the prior density at a specific parameter value. Here, we are interested in .5, a “null hypothesis” value indicating that the person’s latent ability is .5, i.e. that they are simply guessing.</p>
+<pre class="r"><code>filter(pd, x == .5) %&gt;% 
+    mutate(BF01 = Posterior/Prior,
+           BF10 = 1/BF01) %&gt;% 
+    round(3)</code></pre>
+<pre><code>## # A tibble: 1 x 5
+##       x Prior Posterior  BF01  BF10
+##   &lt;dbl&gt; &lt;dbl&gt;     &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+## 1   0.5     1     0.107 0.107  9.31</code></pre>
+<p>OK, so in this example we are able to get to the posterior with simply adding values into the parameters of the Beta distribution, but let’s now see how to get to this problem using brms.</p>
+<pre class="r"><code>library(brms)</code></pre>
+<p>First, here’s the brms formula of the model:</p>
+<pre class="r"><code>s | trials(k) ~ 0 + intercept, 
+family=binomial(link=&quot;identity&quot;), 
+data = d</code></pre>
+<p>Read the first line as “s successes from k trials regressed on intercept”. That’s a little clunky, but bear with it. If you are familiar with R’s modeling syntax, you’ll be wondering why we didn’t simply specify <code>~ 1</code>–R’s default notation for an intercept. The reason is that brms by default uses a little trick in parameterizing the intercept which speeds up the MCMC sampling. In order to specify a prior for the intercept, you’ll have to take the default intercept out (<code>0 +</code>), and use the reserved string <code>intercept</code> to say that you mean the regular intercept. See <code>?brmsformula</code> for details. (For this model, with only one parameter, this complication doesn’t matter, but I wanted to introduce it early on so that you’d be aware of it when estimating multi-parameter models.)</p>
+<p>The next line specifies that the data model is binomial, and that we want to model it’s parameter through an identity link. Usually when you model proportions or binary data, you’d use a logistic (logistic regression!), probit or other similar link function. In fact this is what we’ll do for later examples. Finally, we’ll use the data frame <code>d</code>.</p>
+<p>OK, then we’ll want to specify our priors. Priors are extremo important for Bayes Factors–and probabilistic inference in general. To help set priors, we’ll first call <code>get_priors()</code> with the model information, which is basically like asking brms to tell what are the possible priors, and how to specify then, given this model.</p>
+<pre class="r"><code>get_prior(s | trials(k) ~ 0 + intercept, 
+          family=binomial(link=&quot;identity&quot;),
+          data = d)</code></pre>
+<pre><code>##   prior class      coef group resp dpar nlpar bound
+## 1           b                                      
+## 2           b intercept</code></pre>
+<p>The first line says that there is only one class of parameters <code>b</code>, think of class <code>b</code> as “betas” or “regression coefficients”. The second line says that the <code>b</code> class has only one parameter, the intercept. So we can set a prior for the intercept, and this prior can be any probability distribution in Stan language. We’ll create this prior using brms’ <code>set_prior()</code>, give it a text string representing the Beta(1, 1) prior for all parameters of class <code>b</code> (shortcut, could also specify that we want it for the intercept specifically), and then say the upper and lower bounds (<span class="math inline">\(\theta\)</span> must be between 0 and 1).</p>
+<pre class="r"><code>Prior &lt;- set_prior(&quot;beta(1, 1)&quot;, class = &quot;b&quot;, lb = 0, ub = 1)</code></pre>
+<p>Almost there. Now we’ll actually sample from the model using <code>brm()</code>, give it the model, priors, data, ask it to sample from priors (for the density ratio!), and set a few extra MCMC parameters.</p>
+<pre class="r"><code>m &lt;- brm(s | trials(k) ~ 0 + intercept, 
+         family = binomial(link=&quot;identity&quot;),
+         prior = Prior,
+         data = d,
+         sample_prior = TRUE,
+         iter = 1e4,
+         cores = 4,
+         file = here::here(&quot;static/data/bayesfactormodel&quot;))</code></pre>
+<p>We can get the estimated parameter by asking the model summary:</p>
+<pre class="r"><code>m$fit</code></pre>
+<pre><code>## Inference for Stan model: binomial brms-model.
+## 4 chains, each with iter=10000; warmup=5000; thin=1; 
+## post-warmup draws per chain=5000, total post-warmup draws=20000.
+## 
+##              mean se_mean   sd  2.5%   25%   50%   75% 97.5% n_eff Rhat
+## b_intercept  0.83    0.00 0.10  0.59  0.77  0.85  0.91  0.98 16429    1
+## prior_b      0.50    0.00 0.29  0.03  0.25  0.50  0.75  0.98 17255    1
+## lp__        -5.65    0.01 1.16 -8.73 -6.10 -5.29 -4.82 -4.52  7686    1
+## 
+## Samples were drawn using NUTS(diag_e) at Fri Aug  3 15:18:17 2018.
+## For each parameter, n_eff is a crude measure of effective sample size,
+## and Rhat is the potential scale reduction factor on split chains (at 
+## convergence, Rhat=1).</code></pre>
+<p>The Credible Interval matches exactly what’s reported in the paper. The point estimate differs slightly because here we see the posterior mean, whereas in the paper, Wagenmakers et al. report the posterior mode. I’ll draw a line at their posterior mode, below, to show that it matches.</p>
+<pre class="r"><code>samples &lt;- posterior_samples(m, &quot;b&quot;)
+head(samples)</code></pre>
+<pre><code>##   b_intercept   prior_b
+## 1   0.9377389 0.9278840
+## 2   0.9699833 0.6220091
+## 3   0.8509855 0.7057130
+## 4   0.8972210 0.4515721
+## 5   0.7882210 0.7686789
+## 6   0.9110600 0.2389551</code></pre>
+<pre class="r"><code>gather(samples, Type, value) %&gt;% 
+    ggplot(aes(value, col=Type)) +
+    geom_density() +
+    labs(x = bquote(theta), y = &quot;Density&quot;) +
+    geom_vline(xintercept = .89)  # Vertical line at .89</code></pre>
+<p><img src="/post/2017-03-21-bayes-factors-with-brms_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>We can already see the densities, so all that’s left is to obtain the exact values at the value of interest (.5) and take the <span class="math inline">\(\frac{posterior}{prior}\)</span> ratio. Instead of doing any of this by hand, we’ll use brms’ function <code>hypothesis()</code> that allows us to test point hypotheses using the Dickey Savage density ratio. For this function we’ll need to specify the point of interest, .5, as the point hypothesis to be tested.</p>
+<pre class="r"><code>h &lt;- hypothesis(m, &quot;intercept = 0.5&quot;)
+print(h, digits = 4)</code></pre>
+<pre><code>## Hypothesis Tests for class b:
+##              Hypothesis Estimate Est.Error CI.Lower CI.Upper Evid.Ratio
+## 1 (intercept)-(0.5) = 0   0.3336    0.1024   0.0886   0.4772     0.1073
+##   Post.Prob Star
+## 1    0.0969    *
+## ---
+## &#39;*&#39;: The expected value under the hypothesis lies outside the 95%-CI.
+## Posterior probabilities of point hypotheses assume equal prior probabilities.</code></pre>
+<p>The <code>Evid.Ratio</code> is our Bayes Factor BF01. Notice that it matches the value 0.107 pretty well! You can also plot this hypothesis:</p>
+<pre class="r"><code>plot(h)</code></pre>
+<p><img src="/post/2017-03-21-bayes-factors-with-brms_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
+<p>However, I think the default plot isn’t fantastic (not a fan of the axis adjustments, title). Fortunately, <code>plot(hypothesis)</code> returns a ggplot2 object, which is easily customized.</p>
+<pre class="r"><code>p &lt;- plot(h, plot = F, theme = theme_get())[[1]]
+p + scale_x_continuous(breaks = seq(-.5, .5, by = .25),
+                       labels = seq(-.5, .5, by = .25)+.5)</code></pre>
+<p><img src="/post/2017-03-21-bayes-factors-with-brms_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>OK, so that was a lot of work for such a simple problem, but the real beauty of brms (and Stan) is the unparalleled scalability: We can easily solve a problem with one row of data and one parameter, and it won’t take much more to solve a problem with tens of thousands of rows of data, and hundreds of parameters. Let’s move on to the next example from Wagenmakers et al. (2010).</p>
+</div>
+<div id="example-1-equality-of-proportions" class="section level1">
+<h1><span class="header-section-number">2</span> Example 1: Equality of Proportions</h1>
+<p>For context, please refer to the paper.</p>
+<pre class="r"><code>d &lt;- data.frame(
+    pledge = c(&quot;yes&quot;, &quot;no&quot;),
+    s = c(424, 5416),
+    n = c(777, 9072)
+)
+d</code></pre>
+<pre><code>##   pledge    s    n
+## 1    yes  424  777
+## 2     no 5416 9072</code></pre>
+<p>They use Beta(1, 1) priors for both rate parameters, which we’ll do as well. Notice that usually a regression formula has an intercept and a coefficient (e.g. effect of group.) By taking the intercept out (<code>0 +</code>) we can define two pledger-group proportions instead, and set priors on these. If we used an intercept + effect formula, we could set a prior on the effect itself.</p>
+<pre class="r"><code>get_prior(s | trials(n) ~ 0 + pledge, 
+          family=binomial(link=&quot;identity&quot;),
+          data = d)</code></pre>
+<pre><code>##   prior class      coef group resp dpar nlpar bound
+## 1           b                                      
+## 2           b  pledgeno                            
+## 3           b pledgeyes</code></pre>
+<p>We can set the Beta prior for both groups’ rate with one line of code by setting the prior on the <code>b</code> class without specifying the <code>coef</code>.</p>
+<pre class="r"><code>Prior &lt;- set_prior(&quot;beta(1, 1)&quot;, class = &quot;b&quot;, lb = 0, ub = 1)</code></pre>
+<p>Like above, let’s estimate.</p>
+<pre class="r"><code>m1 &lt;- brm(s | trials(n) ~ 0 + pledge, 
+         family = binomial(link=&quot;identity&quot;),
+         prior = Prior,
+         sample_prior = TRUE,
+         iter = 1e4,
+         data = d,
+         cores = 4,
+         file = here::here(&quot;static/data/bayesfactormodel2&quot;))</code></pre>
+<p>Our estimates match the MLEs reported in the paper:</p>
+<pre class="r"><code>print(m1, digits=3)</code></pre>
+<pre><code>##  Family: binomial 
+##   Links: mu = identity 
+## Formula: s | trials(n) ~ 0 + pledge 
+##    Data: d (Number of observations: 2) 
+## Samples: 4 chains, each with iter = 10000; warmup = 5000; thin = 1;
+##          total post-warmup samples = 20000
+## 
+## Population-Level Effects: 
+##           Estimate Est.Error l-95% CI u-95% CI Eff.Sample  Rhat
+## pledgeno     0.597     0.005    0.587    0.607      20096 1.000
+## pledgeyes    0.546     0.018    0.510    0.581      19094 1.000
+## 
+## Samples were drawn using sampling(NUTS). For each parameter, Eff.Sample 
+## is a crude measure of effective sample size, and Rhat is the potential 
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>To get the density ratio Bayes Factor, we’ll need to specify a text string as our hypothesis. Our hypothesis is that the rate parameters <span class="math inline">\(\theta_1\)</span> and <span class="math inline">\(\theta_2\)</span> are not different: <span class="math inline">\(\theta_1\)</span> = <span class="math inline">\(\theta_2\)</span>. The alternative, then, is the notion that the parameter values differ.</p>
+<pre class="r"><code>h1 &lt;- hypothesis(m1, &quot;pledgeyes = pledgeno&quot;)
+print(h1, digits = 3)</code></pre>
+<pre><code>## Hypothesis Tests for class b:
+##                 Hypothesis Estimate Est.Error CI.Lower CI.Upper Evid.Ratio
+## 1 (pledgeyes)-(pled... = 0   -0.051     0.019   -0.088   -0.015      0.505
+##   Post.Prob Star
+## 1     0.336    *
+## ---
+## &#39;*&#39;: The expected value under the hypothesis lies outside the 95%-CI.
+## Posterior probabilities of point hypotheses assume equal prior probabilities.</code></pre>
+<p>As noted in the paper, a difference value of 0 is about twice as well supported before seeing the data, i.e. the null hypothesis of no difference is twice less likely after seeing the data:</p>
+<pre class="r"><code>1/h1$hypothesis$Evid.Ratio  # BF10</code></pre>
+<pre><code>## [1] 1.979173</code></pre>
+<p>The paper reports BF01 = 0.47, so we’re getting the same results (as we should.) You can also compare this figure to what’s reported in the paper.</p>
+<pre class="r"><code>h1p1 &lt;- plot(h1, theme = theme_get(), plot = F)[[1]] +
+    theme(legend.position = &quot;top&quot;)
+h1p2 &lt;- plot(h1, theme = theme_get(), plot = F)[[1]] + 
+    coord_cartesian(xlim = c(-.05, .05), ylim = c(0, 5)) +
+    theme(legend.position = &quot;top&quot;)
+gridExtra::grid.arrange(h1p1, h1p2, nrow = 1)</code></pre>
+<p><img src="/post/2017-03-21-bayes-factors-with-brms_files/figure-html/unnamed-chunk-24-1.png" width="672" /></p>
+<p>Moving right on to Example 2, skipping the section on “order restricted analysis”.</p>
+</div>
+<div id="example-2-hierarchical-bayesian-one-sample-proportion-test" class="section level1">
+<h1><span class="header-section-number">3</span> Example 2: Hierarchical Bayesian one-sample proportion test</h1>
+<p>The data for example 2 is not available, but we’ll simulate similar data. The simulation assumes that the neither-primed condition average correct probability is 50%, and that the both-primed condition benefit is 5%. Obviously, the numbers here won’t match anymore, but the data reported in the paper has an average difference in proportions of about 4%.</p>
+<pre class="r"><code>set.seed(5)
+d &lt;- tibble(
+    id = c(rep(1:74, each = 2)),
+    primed = rep(c(&quot;neither&quot;, &quot;both&quot;), times = 74),
+    prime = rep(c(0, 1), times = 74),  # Dummy coded
+    n = 21,
+    correct = rbinom(74*2, 21, .5 + prime * .05)
+)
+group_by(d, primed) %&gt;% summarize(p = sum(correct)/sum(n))</code></pre>
+<pre><code>## # A tibble: 2 x 2
+##   primed      p
+##   &lt;chr&gt;   &lt;dbl&gt;
+## 1 both    0.542
+## 2 neither 0.499</code></pre>
+<p>This data yields a similar t-value as in the paper.</p>
+<pre class="r"><code>t.test(correct/n ~ primed, paired = T, data = d)</code></pre>
+<pre><code>## 
+##  Paired t-test
+## 
+## data:  correct/n by primed
+## t = 2.3045, df = 73, p-value = 0.02404
+## alternative hypothesis: true difference in means is not equal to 0
+## 95 percent confidence interval:
+##  0.005741069 0.079201016
+## sample estimates:
+## mean of the differences 
+##              0.04247104</code></pre>
+<p>Instead of doing a probit regression, I’m going to do logistic regression. Therefore we define the prior on the log-odds scale. The log odds for the expected probability of .5 is 0. I prefer log-odds because–although complicated–they make sense, unlike standardized effect sizes. Note that the probit scale would also be fine as they are very similar.</p>
+<p>Let’s just get a quick intuition about effects in log-odds: The change in log odds from p = .5 to .55 is about 0.2.</p>
+<pre class="r"><code>library(arm)
+tibble(rate = seq(0, 1, by = .01),
+    logit = logit(rate)) %&gt;%
+    ggplot(aes(rate, logit)) +
+    geom_line(size=1) +
+    geom_segment(x = 0, xend = 0.55, y = .2, yend = .2, size=.4) +
+    geom_segment(x = 0, xend = 0.5, y = 0, yend = 0, size=.4) +
+    coord_cartesian(ylim = c(-2, 2), expand=0)</code></pre>
+<p><img src="/post/2017-03-21-bayes-factors-with-brms_files/figure-html/unnamed-chunk-27-1.png" width="672" /></p>
+<p>We are cheating a little because we know these values, having simulated the data. However, log-odds are not straightforward (!), and this knowledge will allow us to specify better priors in this example. Let’s get the possible priors for this model by calling <code>get_prior()</code>. Notice that the model now includes id-varying “random” effects, and we model them from independent Gaussians by specifying <code>||</code> instead of <code>|</code> which would give a multivariate Gaussian on the varying effects.</p>
+<pre class="r"><code>get_prior(correct | trials(n) ~ 0 + intercept + prime + 
+              (0 + intercept + prime || id), 
+          family=binomial(link=&quot;logit&quot;),
+          data = d)</code></pre>
+<pre><code>##                 prior class      coef group resp dpar nlpar bound
+## 1                         b                                      
+## 2                         b intercept                            
+## 3                         b     prime                            
+## 4 student_t(3, 0, 10)    sd                                      
+## 5                        sd              id                      
+## 6                        sd intercept    id                      
+## 7                        sd     prime    id</code></pre>
+<p>The leftmost column gives the pre-specified defaults used by brms. Here are the priors we’ll specify. The most important pertains to <code>prime</code>, which is going to be the effect size in log-odds. Our prior for the log odds of the prime effect is going to be a Gaussian distribution centered on 0, with a standard deviation of .2, which is rather diffuse.</p>
+<pre class="r"><code>Prior &lt;- c(
+    set_prior(&quot;normal(0, 10)&quot;, class = &quot;b&quot;, coef = &quot;intercept&quot;),
+    set_prior(&quot;cauchy(0, 10)&quot;, class = &quot;sd&quot;),
+    set_prior(&quot;normal(0, .2)&quot;, class = &quot;b&quot;, coef = &quot;prime&quot;)
+)</code></pre>
+<p>Then we estimate the model using the specified priors.</p>
+<pre class="r"><code>m2 &lt;- brm(correct | trials(n) ~ 0 + intercept + prime + 
+              (0 + intercept + prime || id), 
+         family = binomial(link=&quot;logit&quot;),
+         prior = Prior,
+         sample_prior = TRUE,
+         iter = 1e4,
+         data = d,
+         cores = 4,
+         file = here::here(&quot;static/data/bayesfactormodel3&quot;))</code></pre>
+<p>OK, so our results here will be different because we didn’t parameterize the prior on a standardized effect size because <strong>a</strong>) I don’t like standardized effect sizes, and <strong>b</strong>) I would have to play around with the Stan code, and this post is about brms. Two good reasons not to use standardized effect sizes! Anyway, here are the estimated parameters:</p>
+<pre class="r"><code>summary(m2)</code></pre>
+<pre><code>##  Family: binomial 
+##   Links: mu = logit 
+## Formula: correct | trials(n) ~ 0 + intercept + prime + (0 + intercept + prime || id) 
+##    Data: d (Number of observations: 148) 
+## Samples: 4 chains, each with iter = 10000; warmup = 5000; thin = 1;
+##          total post-warmup samples = 20000
+## 
+## Group-Level Effects: 
+## ~id (Number of levels: 74) 
+##               Estimate Est.Error l-95% CI u-95% CI Eff.Sample Rhat
+## sd(intercept)     0.07      0.05     0.00     0.18       7899 1.00
+## sd(prime)         0.12      0.08     0.01     0.30       5979 1.00
+## 
+## Population-Level Effects: 
+##           Estimate Est.Error l-95% CI u-95% CI Eff.Sample Rhat
+## intercept     0.01      0.05    -0.09     0.11      20330 1.00
+## prime         0.15      0.07     0.02     0.29      20222 1.00
+## 
+## Samples were drawn using sampling(NUTS). For each parameter, Eff.Sample 
+## is a crude measure of effective sample size, and Rhat is the potential 
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>And our null-hypothesis density ratio:</p>
+<pre class="r"><code>h2 &lt;- hypothesis(m2, &quot;prime = 0&quot;)
+h2</code></pre>
+<pre><code>## Hypothesis Tests for class b:
+##    Hypothesis Estimate Est.Error CI.Lower CI.Upper Evid.Ratio Post.Prob
+## 1 (prime) = 0     0.15      0.07     0.02     0.29       0.26      0.21
+##   Star
+## 1    *
+## ---
+## &#39;*&#39;: The expected value under the hypothesis lies outside the 95%-CI.
+## Posterior probabilities of point hypotheses assume equal prior probabilities.</code></pre>
+<p>Priming effect of zero log-odds is 4 times less likely after seeing the data:</p>
+<pre class="r"><code>1/h2$hypothesis$Evid.Ratio</code></pre>
+<pre><code>## [1] 3.860346</code></pre>
+<p>This is best illustrated by plotting the densities:</p>
+<pre class="r"><code>plot(h2)</code></pre>
+<p><img src="/post/2017-03-21-bayes-factors-with-brms_files/figure-html/unnamed-chunk-34-1.png" width="672" /></p>
+</div>
+<div id="conclusion" class="section level1">
+<h1><span class="header-section-number">4</span> Conclusion</h1>
+<p>Read the paper! Hopefully you’ll be able to use brms’ <code>hypothesis()</code> function to calculate bayes factors when needed.</p>
+</div>
+<div id="references" class="section level1">
+<h1><span class="header-section-number">5</span> References</h1>
+<div class="csl-bib-body" style="line-height: 2; padding-left: 2em; text-indent:-2em;">
+<div class="csl-entry">
+Buerkner, P.-C. (2016). <i>brms: Bayesian Regression Models using Stan</i>. Retrieved from <a href="http://CRAN.R-project.org/package=brms" class="uri">http://CRAN.R-project.org/package=brms</a>
+</div>
+<span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Adc&amp;rft.type=computerProgram&amp;rft.title=brms%3A%20Bayesian%20Regression%20Models%20using%20Stan&amp;rft.identifier=http%3A%2F%2FCRAN.R-project.org%2Fpackage%3Dbrms&amp;rft.aufirst=Paul-Christian&amp;rft.aulast=Buerkner&amp;rft.au=Paul-Christian%20Buerkner&amp;rft.date=2016"></span>
+<div class="csl-entry">
+Stan Development Team. (2016a). <i>RStan: the R interface to Stan</i>. Retrieved from <a href="http://mc-stan.org/" class="uri">http://mc-stan.org/</a>
+</div>
+<span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=book&amp;rft.btitle=RStan%3A%20the%20R%20interface%20to%20Stan&amp;rft.aulast=Stan%20Development%20Team&amp;rft.au=Stan%20Development%20Team&amp;rft.date=2016"></span>
+<div class="csl-entry">
+Stan Development Team. (2016b). <i>Stan: A C++ Library for Probability and Sampling, Version 2.14.1</i>. Retrieved from <a href="http://mc-stan.org/" class="uri">http://mc-stan.org/</a>
+</div>
+<span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=book&amp;rft.btitle=Stan%3A%20A%20C%2B%2B%20Library%20for%20Probability%20and%20Sampling%2C%20Version%202.14.1&amp;rft.aulast=Stan%20Development%20Team&amp;rft.au=Stan%20Development%20Team&amp;rft.date=2016"></span>
+<div class="csl-entry">
+Wagenmakers, E.-J., Lodewyckx, T., Kuriyal, H., &amp; Grasman, R. (2010). Bayesian hypothesis testing for psychologists: A tutorial on the Savage–Dickey method. <i>Cognitive Psychology</i>, <i>60</i>(3), 158–189. <a href="https://doi.org/10.1016/j.cogpsych.2009.12.001" class="uri">https://doi.org/10.1016/j.cogpsych.2009.12.001</a>
+</div>
+<p><span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_id=info%3Adoi%2F10.1016%2Fj.cogpsych.2009.12.001&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.atitle=Bayesian%20hypothesis%20testing%20for%20psychologists%3A%20A%20tutorial%20on%20the%20Savage%E2%80%93Dickey%20method&amp;rft.jtitle=Cognitive%20Psychology&amp;rft.stitle=Cognitive%20Psychology&amp;rft.volume=60&amp;rft.issue=3&amp;rft.aufirst=Eric-Jan&amp;rft.aulast=Wagenmakers&amp;rft.au=Eric-Jan%20Wagenmakers&amp;rft.au=Tom%20Lodewyckx&amp;rft.au=Himanshu%20Kuriyal&amp;rft.au=Raoul%20Grasman&amp;rft.date=2010-05&amp;rft.pages=158-189&amp;rft.spage=158&amp;rft.epage=189&amp;rft.issn=0010-0285"></span></p>
+</div>
+</div>
+<div id="appendix" class="section level1">
+<h1><span class="header-section-number">6</span> Appendix</h1>
+<p>brms produces exceptionally well written Stan code. Stan code of the last example model:</p>
+<pre class="r"><code>cat(rstan::get_stancode(m2$fit))</code></pre>
+<pre><code>## // generated with brms 2.4.0
+## functions { 
+## } 
+## data { 
+##   int&lt;lower=1&gt; N;  // total number of observations 
+##   int Y[N];  // response variable 
+##   int trials[N];  // number of trials 
+##   int&lt;lower=1&gt; K;  // number of population-level effects 
+##   matrix[N, K] X;  // population-level design matrix 
+##   // data for group-level effects of ID 1
+##   int&lt;lower=1&gt; J_1[N];
+##   int&lt;lower=1&gt; N_1;
+##   int&lt;lower=1&gt; M_1;
+##   vector[N] Z_1_1;
+##   vector[N] Z_1_2;
+##   int prior_only;  // should the likelihood be ignored? 
+## } 
+## transformed data { 
+## } 
+## parameters { 
+##   vector[K] b;  // population-level effects 
+##   vector&lt;lower=0&gt;[M_1] sd_1;  // group-level standard deviations
+##   vector[N_1] z_1[M_1];  // unscaled group-level effects
+##   // parameters to store prior samples
+##   real&lt;lower=0&gt; prior_sd_1;
+## } 
+## transformed parameters { 
+##   // group-level effects 
+##   vector[N_1] r_1_1 = sd_1[1] * (z_1[1]);
+##   vector[N_1] r_1_2 = sd_1[2] * (z_1[2]);
+## } 
+## model { 
+##   vector[N] mu = X * b;
+##   for (n in 1:N) { 
+##     mu[n] += r_1_1[J_1[n]] * Z_1_1[n] + r_1_2[J_1[n]] * Z_1_2[n];
+##   } 
+##   // priors including all constants 
+##   target += normal_lpdf(b[1] | 0, 10); 
+##   target += normal_lpdf(b[2] | 0, .2); 
+##   target += cauchy_lpdf(sd_1 | 0, 10)
+##     - 2 * cauchy_lccdf(0 | 0, 10); 
+##   target += normal_lpdf(z_1[1] | 0, 1);
+##   target += normal_lpdf(z_1[2] | 0, 1);
+##   // likelihood including all constants 
+##   if (!prior_only) { 
+##     target += binomial_logit_lpmf(Y | trials, mu);
+##   } 
+##   // additionally draw samples from priors
+##   target += cauchy_lpdf(prior_sd_1 | 0,10);
+## } 
+## generated quantities { 
+##   // additionally draw samples from priors
+##   real prior_b_1 = normal_rng(0,10);
+##   real prior_b_2 = normal_rng(0,.2);
+## }</code></pre>
+</div>

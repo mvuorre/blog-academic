@@ -1,0 +1,408 @@
+---
+title: How to Compare Two Groups with Robust Bayesian Estimation Using R, Stan and
+  brms
+author: Matti Vuorre
+date: '2017-01-02'
+slug: how-to-compare-two-groups-with-robust-bayesian-estimation-using-r-stan-and-brms
+categories:
+  - statistics
+tags:
+  - bayes
+  - R
+  - tutorial
+  - brms
+draft: no
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 2
+summary: "2017 will be the year when social scientists finally decided to diversify their applied statistics toolbox, and stop relying 100% on null hypothesis significance testing (NHST). A very appealing alternative to NHST is Bayesian statistics, which in itself contains many approaches to statistical inference. In this post, I provide an introductory and practical tutorial to Bayesian parameter estimation in the context of comparing two independent groups' data."
+---
+
+```{r, message=F, echo=F}
+library(brms)
+library(coda)
+library(broom)
+library(knitr)
+opts_chunk$set(
+  echo=F, 
+  error=F, 
+  warning=F, 
+  message=F, 
+  collapse=T,
+  cache = T
+)
+library(tidyverse)
+theme_set(theme_linedraw())
+```
+
+Happy New Year 2017 everybody! 2017 will be the year when social scientists finally decided to diversify their applied statistics toolbox, and stop relying 100% on null hypothesis significance testing (NHST). We now recognize that different scientific questions may require different statistical tools, and are ready to adopt new and innovative methods. A very appealing alternative to NHST is Bayesian statistics, which in itself contains many approaches to statistical inference. In this post, I provide an introductory and practical tutorial to Bayesian parameter estimation in the context of comparing two independent groups' data.
+
+More specifically, we'll focus on the t-test. Everyone knows about it, everyone uses it. Yet, there are (arguably!) better methods for drawing inferences from two independent groups' metric data (Kruschke, 2013; Morey & Rouder, 2015). Let's talk about how "*Bayesian estimation supersedes the t-test*" (Kruschke, 2013). 
+
+[Kruschke (2013, p.573)](http://www.indiana.edu/~kruschke/articles/Kruschke2012JEPG.pdf) writes:
+
+>"When data are interpreted in terms of meaningful parameters in a mathematical description, such as the difference of mean parameters in two groups, it is Bayesian analysis that provides complete information about the credible parameter values. Bayesian analysis is also more intuitive than traditional methods of null hypothesis significance testing (e.g., Dienes, 2011)."
+
+In that article (*Bayesian estimation supersedes the t-test*) Kruschke (2013) provided clear and well-reasoned arguments favoring Bayesian parameter estimation over null hypothesis significance testing in the context of comparing two groups, a situation which is usually dealt with a t-test. It also introduced a robust model for comparing two groups, which modeled the data as t-distributed, instead of a Gaussian distribution. The article provided R code for running the estimation procedures, which could be downloaded from the [author's website](http://www.indiana.edu/~kruschke/BEST/) or [as an R package](https://cran.r-project.org/package=BEST) (Kruschke & Meredith, 2015). 
+
+The R code and programs work well for this specific application (estimating the robust model for one or two groups' metric data). However, modifying the code to handle more complicated situations is not easy, and the underlying estimation algorithms don't necessarily scale up to handle more complicated situations. Therefore, today I'll introduce easy to use, free, open-source, state-of-the-art computer programs for Bayesian estimation, in the context of comparing two groups' metric (continuous) data. The programs are available for the R programming language--so make sure you are familiar with R basics (e.g. [Vuorre, 2016](http://blog.efpsa.org/2016/12/05/introduction-to-data-analysis-using-r/)). I provide R code (it's super easy, don't worry!) for t-tests and Bayesian estimation in R using the R package **brms** (Buerkner, 2016), which uses the powerful [Stan](http://mc-stan.org/) [MCMC](https://en.wikipedia.org/wiki/Markov_chain_Monte_Carlo) program (Stan Development Team, 2016) under the hood. 
+
+These programs supersede older Bayesian inference programs because they are easy to use (brms is an interface to Stan, which is actually a programming language in itself), fast, and are able to handle models with thousands of parameters. Learning to implement basic analyses such as t-tests, and Kruschke's robust model, with these programs is very useful because (obviously) you'll then be able to do Bayesian statistics in practice, and will be prepared to understand and implement more complex models.
+
+Understanding the results of Bayesian estimation requires understanding some basics of Bayesian statistics, which I won't describe here at all. If you are not familiar with Bayesian statistics, please read Kruschke's excellent article (his book is also very good, Kruschke, 2014; see also McElreath, 2016). In fact, you should read the paper anyway, it's very good.
+
+First, I'll introduce the basics of t-tests in some detail, and then focus on understanding them as specific instantiations of *linear models*. If that sounds familiar, skip ahead to **Bayesian Estimation of the t-test**, where I introduce the **brms** package for estimating models using Bayesian methods. Following that, we'll use "distributional regression" to obtain Bayesian estimates of the unequal variances t-test model. Finally, we'll learn how to estimate Kruschke's (2013) BEST model using brms. 
+
+# The t in a t-test
+
+We'll begin with t-tests, using example data from Kruschke's paper (p. 577):
+
+>"Consider data from two groups of people who take an IQ test. Group 1 (N1=47) consumes a “smart drug,” and Group 2 (N2=42) is a control group that consumes a placebo."
+
+```{r, echo=F}
+group_0 <- c(99,101,100,101,102,100,97,101,104,101,102,102,100,105,88,101,100,
+       104,100,100,100,101,102,103,97,101,101,100,101,99,101,100,100,
+       101,100,99,101,100,102,99,100,99)
+group_1 <- c(101,100,102,104,102,97,105,105,98,101,100,123,105,103,100,95,102,106,
+       109,102,82,102,100,102,102,101,102,102,103,103,97,97,103,101,97,104,
+       96,103,124,101,101,100,101,101,104,100,101)
+d <- bind_rows(tibble(Group = 0, IQ = group_0), 
+               tibble(Group = 1, IQ = group_1))
+dsum <- d %>% 
+    group_by(Group) %>%
+    summarize(m = mean(IQ),
+              s = sd(IQ))
+```
+
+I've decided to call the control group "Group 0", and the treatment group "Group 1", because this coding makes it natural to think of the control group as a "reference group", and any "effect" we'll estimate will be associated with the treatment group. These data are visualized as histograms, below:
+
+```{r dataplot1, fig.height=3.2, fig.cap="Histograms of the two groups' IQ scores."}
+ggplot(d, aes(x=IQ)) +
+    geom_histogram(binwidth=1, aes(y=..density..), col="black") +
+    geom_label(data = dsum,
+               aes(label = paste("mean =", round(m, 1),
+                                 "\nSD =", round(s, 1)), x=90, y=.35)) +
+    scale_y_continuous("p(y)", limits = c(0, .4), expand=c(0,0)) +
+    facet_wrap("Group", labeller = label_both, nrow=1)
+```
+
+## Equal variances t-test
+
+These two groups' IQ scores could be compared with a simple **equal variances t-test** (which you shouldn't use; [Lakens, 2015](https://daniellakens.blogspot.com/2015/01/always-use-welchs-t-test-instead-of.html)), also known as Student's t-test. I have the two groups' IQ scores in R as two vectors called `group_0` and `group_1`, so doing a t-test is as easy as
+
+```{r, echo=T}
+t.test(group_0, group_1, var.equal=T)
+```
+
+We interpret the t-test in terms of the observed t-value, and whether it exceeds the critical t-value. The critical t-value, in turn, is defined as the extreme $\alpha / 2$ percentiles of a t-distribution with the given degrees of freedom. The current situation is illustrated below:
+
+```{r, fig.cap="t distribution with 87 degrees of freedom, and observed t-value. The dashed vertical lines indicate the extreme 2.5 percentiles. We would reject the null hypothesis of no difference if the observed t-value exceeded these percentiles.", fig.width=4, fig.height=3.2}
+x <- seq(-5, 5, by=.1)
+y <- dt(x, 87)
+ggplot(data.frame(x, y), aes(x=x, y=y)) +
+    geom_line(size=1.3) +
+    geom_vline(xintercept = qt(c(0.025, 0.975), df=87), lty=2) +
+    geom_segment(arrow=arrow(),
+                 aes(x=1.5587, xend=1.5587, y=.3, yend=0)) +
+    geom_label(aes(x=1.5587, y=.3), label="Observed\nt-value") +
+    scale_y_continuous("", limits = c(0, .5), 
+                       expand=c(0,0.001), breaks=NULL) +
+    scale_x_continuous("", expand=c(0,0), breaks=-3:3, limits=c(-4,4))
+```
+
+The test results in an observed t-value of 1.56, which is not far enough in the tails of a t-distribution with 87 degrees of freedom to warrant rejecting the null hypothesis (given that we are using $\alpha$ = .05, which may or may not be an entirely brilliant idea (e.g. Rouder, Morey, Verhagen, Province, & Wagenmakers, 2016)). Note that R also reports a 95% CI for the estimated difference between the two groups.
+
+## Unequal variances t-test
+
+Next, we'll run the more appropriate, **unequal variances t-test** (also known as Welch's t-test), which R gives by default:
+
+```{r, echo=T}
+t.test(group_0, group_1)
+```
+
+Note that while R gives Welch's t-test by default, SPSS gives both. If you're using SPSS, make sure to report the Welch's test results, instead of the equal variances test. Here, the conclusion with respect to rejecting the null hypothesis of equal means is the same. However, notice that the results are numerically different, as they should, because these two t-tests refer to different models!
+
+As a side note, I recently learned that this problem (estimating and testing the difference between two means when the variances are not assumed equal) is unsolved: [only approximate solutions are known](https://en.wikipedia.org/wiki/Behrens%E2%80%93Fisher_problem).
+
+It is of course up to you, as a researcher, to decide whether you assume equal variances or not. But note that we almost always allow the means to be different (that's the whole point of the test, really), while many treatments may just as well have an effect on the standard deviations. 
+
+The first take-home message from today is that there are actually two t-tests, each associated with a different statistical model. And to make clear what the difference is, we must acquaint ourselves with the models. 
+
+## Describing the model(s) underlying the t-test(s)
+
+We don't usually think of t-*tests* (and ANOVAs) as *models*, but it turns out that they are just linear models disguised as tests (see [here](http://www.sbirc.ed.ac.uk/cyril/SPM-course/Talks/2013/1-GLM-CP.pdf) and [here](https://stats.stackexchange.com/questions/59047/how-are-regression-the-t-test-and-the-anova-all-versions-of-the-general-linear)). Recently, there has been a tremendous push for model/parameter estimation, instead of null hypothesis significance testing (e.g. Cumming, 2014; Kruschke, 2014; see also the brilliant commentary by Gigerenzer, 2004), so we will benefit from thinking about t-tests as linear models. Doing so will facilitate "[interpreting data] in terms of meaningful parameters in a mathematical description" (Kruschke, 2013), and seamlessly expanding our models to handle more complicated situations. 
+
+The equal variances t-test models metric data with three parameters: Mean for group A, mean for group B, and one shared standard deviation (i.e. the assumption that the standard deviations [we usually refer to variances, but whatever] are equal between the two groups.) 
+
+We call the metric data (IQ scores in our example) $y_{ik}$, where $i$ is a subscript indicating the $i^{th}$ datum, and $k$ indicates the $k^{th}$ group. So $y_{19, 1}$ would be the 19th datum, belonging to group 1. Then we specify that $y_{ik}$ are Normally distributed, $N(\mu_{ik}, \sigma)$, where $\mu_{ik}$ indicates the mean of group $k$, and $\sigma$ the common standard deviation.
+
+$$y_{ik} \sim N(\mu_{ik}, \sigma)$$
+
+Read the formula as "Y is normally distributed with mean $\mu_{ik}$ (mu), and standard deviation $\sigma$ (sigma)". Note that the standard deviation $\sigma$ doesn't have any subscripts: we assume it is the same for the $k$ groups. Note also that you'll often see the second parameter in the parentheses as $\sigma^2$, referring to the variance.
+
+The means for groups 0 and 1 are simply $\mu_0$ and $\mu_1$, respectively, and their difference (let's call it $d$) is $d = \mu_0 - \mu_1$. The 95% CI for $d$ is given in the t-test output, and we can tell that it differs from the one given by Welch's t-test.
+
+It is unsurprising, then, that if we use a different model (the more appropriate unequal variances model; [Lakens, 2015](https://daniellakens.blogspot.com/2015/01/always-use-welchs-t-test-instead-of.html)), our inferences may be different. Welch's t-test is the same as Student's, except that now we assume (and subsequently estimate) a unique standard deviation $\sigma_{ik}$ for both groups.
+
+$$y_{ik} \sim N(\mu_{ik}, \sigma_{ik})$$
+
+This model makes a lot of sense, because rarely are we in a situation to *a priori* decide that the variance of scores in Group A is equal to the variance of scores in Group B. If you use the equal variances t-test, you should be prepared to justify and defend this assumption. (Deciding between models--such as between these two t-tests--is one way in which our **prior** information enters and influences data analysis. This fact should make you less suspicious about priors in Bayesian analyses.)
+
+Armed with this knowledge, we can now see that "conducting a t-test" can be understood as estimating one of these two models. By estimating the model, we obtain t-values, degrees of freedom, and consequently, [p-values](http://fivethirtyeight.com/features/not-even-scientists-can-easily-explain-p-values/). 
+
+However, to focus on modeling and estimation, it is easier to think of the t-test as a specific type of the **general linear model**, (aka linear regression). We can re-write the t-test in an equivalent way, but instead have a specific parameter for the difference in means by writing it as a linear model. (For simplicity, I'll only write the equal variances model):
+
+$$y_{ik} \sim N(\mu_{ik}, \sigma)$$
+$$\mu_{ik} = \beta_0 + \beta_1 Group_{ik}$$
+
+Here, $\sigma$ is just as before, but we now *model* the mean with an intercept (Group 0's mean, $\beta_0$) and *the effect of Group 1* ($\beta_1$). To understand whats going on, let's look at the data, *Group* is an indicator variable in the data, for each row of Group 0's data *Group* is zero, and for each row of Group 1's data *Group* is one.
+
+```{r}
+d <- mutate(d, Group = as.integer(Group))
+as.data.frame(psych::headTail(d), row.names = c(1:4, "...", 86:89))
+```
+
+With this model, $\beta_1$ directly tells us the estimated difference in the two groups. And because it is a parameter in the model, it has an associated standard error, t-value, degrees of freedom, and a p-value. This linear model and can be estimated in R with the following line of code:
+
+```{r, echo = T}
+olsmod <- lm(IQ ~ Group, data = d)
+```
+
+The key input here is a model formula, which in R is specified as `outcome ~ predictor` (`DV ~ IV`). Using the `lm()` function, we estimated a linear model predicting `IQ` from an intercept (automatically included) and a Group parameter `Group`, which is the effect of group 1. I called this object `olsmod` for Ordinary Least Squares Model.
+
+R has it's own model formula syntax, which is well worth learning. The formula in the previous model, `IQ ~ Group` means that we want to regress IQ on an intercept (which is implicitly included), and group (`Group`). Besides the formula, we only need to provide the data, which is contained in the object I've conveniently called `d`. 
+
+You can verify that the results are identical to the equal variances t-test above.
+
+```{r, echo=T}
+summary(olsmod)
+```
+
+Focus on the `Group` row in the estimated coefficients. `Estimate` is the point estimate (best guess) of the difference in means ($d = 101.9149 - 100.3571 = 1.5578$). `t value` is the observed t-value (identical to what `t.test()` reported), and the p-value (`Pr(>|t|)`) matches as well. The `(Intercept)` row refers to $\beta_0$, which is group 0's mean.
+
+This way of thinking about the model, where we have parameters for one group's mean, and the effect of the other group, facilitates focusing on the important parameter, the difference, instead of individual means. However, you can of course compute the difference from the means, or the means from one mean and a difference.
+
+# Bayesian estimation of the t-test
+
+## Equal variances model
+
+Next, I'll illustrate how to estimate the equal variances t-test using Bayesian methods. We use **brms** (Buerkner, 2016), and the familiar R formula syntax which we used with the OLS model.
+
+Estimating this model with R, thanks to the Stan and brms teams (Stan Development Team, 2016; Buerkner, 2016), is as easy as the linear regression model we ran above. If you haven't yet installed brms, you need to install it first by running `install.packages("brms")`. Then, to access its functions, load the **brms** package to the current R session.
+
+```{r, echo = T}
+library(brms)
+```
+
+The most important function in the brms package is `brm()`, for Bayesian Regression Model(ing). The user needs only to input a model formula, just as above, and a data frame that contains the variables specified in the formula. `brm()` then translates the model into Stan language, and asks Stan to compile the model into C++ and estimate it (see Kruschke, 2014; McElreath, 2016 for details about estimation). The result is an R object with the estimated results (and much more). We run the model and save the results to `mod_eqvar` for equal variances model:
+
+```{r, echo = T, message=F, results='hide'}
+mod_eqvar <- brm(
+  IQ ~ Group, 
+  data = d,
+  file = here::here("static/data/iqgroup")
+)
+```
+
+```{r}
+print(mod_eqvar, digits=2)
+```
+
+Notice that the model contains three parameters, one of which is the shared standard deviation `sigma`. Compare the output of the Bayesian model to the one estimated with `lm()` (OLS):
+
+```{r}
+library(broom)
+bind_rows("OLS" = tidy(olsmod)[,1:3], 
+          "Bayes" = tidy(mod_eqvar)[1:2,1:3], .id = "Method") %>%
+    kable(digits = 3, align = 'l')
+```
+
+The point estimates (posterior means in the Bayesian model) and standard errors (SD of the respective posterior distribution) are pretty much identical.
+
+We now know the models behind t-tests, and how to estimate the equal variances t-test using the `t.test()`, `lm()`, and `brm()` functions. We also know how to run Welch's t-test using `t.test()`. However, estimating the general linear model version of the unequal variances t-test model is slightly more complicated, because it involves specifying predictors for $\sigma$, the standard deviation parameter.
+
+
+## Unequal variances model
+
+We only need a small adjustment to the equal variances model to specify the unequal variances model:
+
+$$y_{ik} \sim N(\mu_{ik}, \sigma_{ik})$$
+$$\mu_{ik} = \beta_0 + \beta_1 Group_{ik}$$
+
+Notice that we now have subscripts for $\sigma$, denoting that it varies between groups. In fact, we'll write out a linear model for the standard deviation parameter!
+
+$$\sigma_{ik} = \gamma_0 + \gamma_1 Group_{ik}$$
+
+The model now includes, instead of a common $\sigma$, one parameter for Group 0's standard deviation $\gamma_0$ (gamma), and one for the effect of Group 1 on the standard deviation $\gamma_1$, such that group 1's standard deviation is $\gamma_0 + \gamma_1$. Therefore, we have 4 free parameters, two means and two standard deviations. (The full specification would include prior distributions for all the parameters, but that topic is outside of the scope of this post.) Let's estimate!
+
+`brm()` takes more complicated models by wrapping them inside `bf()` (short for `brmsformula()`), which is subsequently entered as the first argument to `brm()`.
+
+```{r, echo=T}
+uneq_var_frm <- bf(IQ ~ Group, sigma ~ Group)
+```
+
+You can see that the formula regresses IQ on Group, such that we'll have an intercept (implicitly included), and an effect of Group 1. Remarkably, we are also able to model the standard deviation sigma, and we regress it on Group (it will also have an intercept and effect of group). 
+
+```{r, echo = T}
+mod_uneqvar <- brm(
+  uneq_var_frm, 
+  data = d, 
+  cores=4,
+  file = here::here("static/data/iqgroup-uv")
+)
+```
+
+```{r}
+print(mod_uneqvar, digits=2)
+```
+
+The model's output contains our 4 parameters. `Intercept` is the mean for group 0, `Group 1` is the "effect of group 1". The `sigma_Intercept` is the standard deviation of Group 0, `sigma_Group` is the effect of group 1 on the standard deviation (the SD of Group 1 is `sigma_Intercept` + `sigma_Group`). The sigmas are implicitly modeled through a log-link (because they must be positive). To convert them back to the scale of the data, they need to be exponentiated. After taking the exponents of the sigmas, the results look like this:
+
+```{r}
+as.data.frame(mod_uneqvar, pars = "sigma") %>% 
+    gather(key=parameter, value=value) %>%
+    mutate(value = exp(value)) %>%
+    bind_rows(as.data.frame(mod_uneqvar)[,1:2] %>%
+                  gather(key=parameter, value=value)) %>%
+    group_by(parameter) %>%
+    summarize(Estimate = mean(value),
+              Est.Error = sd(value),
+              `l-95% CI` = quantile(value, probs = 0.025),
+              `u-95% CI` = quantile(value, probs = 0.975)) %>%
+    .[c(2,1,4,3),] %>%
+    kable(digits = 2, align = 'l')
+```
+
+For comparison, here is the "observed SD" of group 0:
+
+```{r}
+round(sd(group_0), 2)
+```
+
+Keep in mind that the parameters refer to Group 0's mean (Intercept) and SD (sigma), and the difference between groups in those values (Group) and (sigma_Group). We now have fully Bayesian estimates of the 4 parameters of the unequal variances t-test model. Because p-values have no place in Bayesian inference, they are not reported in the output. However, you can calculate a quantity that is equivalent to a one-sided p-value from the posterior distribution: Take the proportion of posterior density (MCMC samples) above/below a reference value (0). This is definitely not the most useful thing you can do with a posterior distribution, but the fact that it numerically matches a one-sided p-value is quite interesting:
+
+```{r, echo = T}
+# Posterior distribution of Group effect
+x <- as.data.frame(mod_uneqvar, pars = "b_Group")[,1]
+# Proportion of MCMC samples below zero
+round((sum(x < 0) / length(x)), 3)
+# One sided p-value from t-test
+round(t.test(group_0, group_1, data = d, alternative = "less")$p.value, 3)
+```
+
+I'm showing this remarkable fact (Marsman & Wagenmakers, no date) not to persuade you to stick with p-values, but to alleviate fears that these methods would always produce discrepant results.
+
+Although this model is super easy to estimate with `brm()` (which, I should emphasize, uses Stan for the estimation procedures), the model seems, frankly speaking, strange. I am just not used to modeling variances, and I'll bet a quarter that neither are you. Nevertheless, there it is!
+
+Finally, let's move on to Kruschke's (2013) "Robust Bayesian Estimation" model.
+
+# Robust Bayesian Estimation
+
+Kruschke's robust model is a comparison of two groups, using five parameters: One mean for each group, one standard deviation for each group, just as in the unequal variances model above. The fifth parameter is a "normality" parameter, $\nu$ (nu), which means that we are now using a t-distribution to model the data. Using a t-distribution to model the data, instead of a Gaussian, means that the model (and therefore our inferences) are less sensitive to extreme values (outliers). Here's what the model looks like:
+
+$$y_{ik} \sim T(\nu, \mu_{ik}, \sigma_{ik})$$
+
+Read the above formula as "Y are random draws from a t-distribution with 'normality' parameter $\nu$, mean $\mu_{ik}$, and standard deviation $\sigma_{ik}$". We have a linear model for the means and standard deviations:
+
+$$\mu_{ik} = \beta_0 + \beta_1 Group_{ik}$$
+
+and
+
+$$\sigma_{ik} = \gamma_0 + \gamma_1 Group_{ik}$$
+
+This model, as you can see, is almost identical to the unequal variances t-test, but instead uses a t distribution (we assume data are t-distributed), and includes the normality parameter. Using `brm()` we can still use the unequal variances model, but have to specify the t-distribution. We do this by specifying the `family` argument to be `student` (as in Student's t)
+
+```{r, echo = T}
+mod_robust <- brm(
+  bf(IQ ~ Group, sigma ~ Group),
+  family=student,
+  data = d, 
+  cores=4,
+  file = here::here("static/data/iqgroup-robust")
+  )
+```
+
+```{r}
+print(mod_robust, digits=3)
+```
+
+The effect of Group is about one unit, with a 95% Credible Interval from 0.2 to 1.8. 
+
+Finally, let's compare the results to those in Kruschke's paper (2013, p.578). Before we do this, I'll convert the estimated parameters to means and standard deviations (instead of the "regression effects" produced by default.) Recall that I recoded the group labels used by Kruschke in the paper, what he calls group 2 is group 0 (control group) in our analyses, but group 1 is still group 1. In the following I transform the results and compute HDIs to obtain results most compatible with Kruschke:
+
+```{r}
+post <- posterior_samples(mod_robust) %>%
+    transmute(
+        group0_mean = b_Intercept,
+        group1_mean = b_Intercept + b_Group,
+        diff_means = abs(b_Group),
+        group0_sigma = exp(b_sigma_Intercept),
+        group1_sigma = exp(b_sigma_Intercept + b_sigma_Group),
+        diff_sigmas = exp(b_sigma_Group),
+        nu = nu,
+        nulog10 = log10(nu)) %>%
+    gather(key, value) %>%
+    group_by(key) %>%
+    summarize(m = mean(value),
+              HDIlwr = coda::HPDinterval(as.mcmc(value))[1],
+              HDIupr = coda::HPDinterval(as.mcmc(value))[2]) %>%
+    .[c(3,5,1,4,6,2,7,8),]
+post %>% kable(digits = 2, align = 'l')
+```
+
+Notice that Kruschke reports modes (2013, p. 578), but our point estimates are means. The results with respect to the group means are identical to two decimal points; the standard deviations are slightly more discrepant, because the paper reports modes, but we focus on posterior means. 
+
+Finally, here is how to estimate the model using the original code (Kruschke & Meredith, 2015):
+
+```{r, echo=T}
+library(BEST)
+BEST <- BESTmcmc(group_0, group_1)
+BEST
+```
+
+This output reports posterior means and HDI limits, which we report above. You can verify that they match very closely to each other. This `BESTmcmc()` function is great, but with brms you are able to estimate a vast variety of models.
+
+# Conclusion
+
+Well, that ended up much longer than what I intended. The aim was both to illustrate the ease of Bayesian modeling in R using **brms** (Buerkner, 2016) and **Stan** (Stan Development Team, 2016), and highlight the fact that we can easily move from simple t-tests to more complex (and possibly better) models.
+
+If you've followed through, you should be able to conduct Student's (equal variances) and Welch's (unequal variances) t-tests in R, and to think about those tests as instantiations of general linear models. Further, you should be able to estimate these models using Bayesian methods.
+
+You should now also be familiar with Kruschke's robust model for comparing two groups' metric data, and be able to implement it in one line of R code. This model was able to find credible differences between two groups, although the frequentist t-tests and models reported p-values well above .05. That should be motivation enough to try robust (Bayesian) models on your own data.
+
+# Further reading
+
+I didn't take any space here to discuss the interpretation of Bayesian statistics. For this, I recommend Kruschke (2014), McElreath (2016). See also Etz, Gronau, Dablander, Edelsbrunner, & Baribault (2016) for an introduction to Bayesian statistics.
+
+# References
+
+<div class="csl-bib-body" style="line-height: 2; padding-left: 2em; text-indent:-2em;">
+  <div class="csl-entry">Buerkner, P.-C. (2016). <i>brms: Bayesian Regression Models using Stan</i>. Retrieved from http://CRAN.R-project.org/package=brms</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Adc&amp;rft.type=computerProgram&amp;rft.title=brms%3A%20Bayesian%20Regression%20Models%20using%20Stan&amp;rft.identifier=http%3A%2F%2FCRAN.R-project.org%2Fpackage%3Dbrms&amp;rft.aufirst=Paul-Christian&amp;rft.aulast=Buerkner&amp;rft.au=Paul-Christian%20Buerkner&amp;rft.date=2016"></span>
+  <div class="csl-entry">Cumming, G. (2014). The New Statistics Why and How. <i>Psychological Science</i>, <i>25</i>(1), 7–29. https://doi.org/10.1177/0956797613504966</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_id=info%3Adoi%2F10.1177%2F0956797613504966&amp;rft_id=info%3Apmid%2F24220629&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.atitle=The%20New%20Statistics%20Why%20and%20How&amp;rft.jtitle=Psychological%20Science&amp;rft.stitle=Psychological%20Science&amp;rft.volume=25&amp;rft.issue=1&amp;rft.aufirst=Geoff&amp;rft.aulast=Cumming&amp;rft.au=Geoff%20Cumming&amp;rft.date=2014-01-01&amp;rft.pages=7-29&amp;rft.spage=7&amp;rft.epage=29&amp;rft.issn=0956-7976%2C%201467-9280&amp;rft.language=en"></span>
+  <div class="csl-entry">Dienes, Z. (2011). Bayesian Versus Orthodox Statistics: Which Side Are You On? <i>Perspectives on Psychological Science</i>, <i>6</i>(3), 274–290. https://doi.org/10.1177/1745691611406920</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_id=info%3Adoi%2F10.1177%2F1745691611406920&amp;rft_id=info%3Apmid%2F26168518&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.atitle=Bayesian%20Versus%20Orthodox%20Statistics%3A%20Which%20Side%20Are%20You%20On%3F&amp;rft.jtitle=Perspectives%20on%20Psychological%20Science&amp;rft.stitle=Perspectives%20on%20Psychological%20Science&amp;rft.volume=6&amp;rft.issue=3&amp;rft.aufirst=Zoltan&amp;rft.aulast=Dienes&amp;rft.au=Zoltan%20Dienes&amp;rft.date=2011-05-01&amp;rft.pages=274-290&amp;rft.spage=274&amp;rft.epage=290&amp;rft.issn=1745-6916%2C%201745-6924&amp;rft.language=en"></span>
+  <div class="csl-entry">Etz, A., Gronau, Q. F., Dablander, F., Edelsbrunner, P. A., &amp; Baribault, B. (2016). How to become a Bayesian in eight easy steps: An annotated reading list. <i>ResearchGate</i>. Retrieved from https://www.researchgate.net/publication/301981861_How_to_become_a_Bayesian_in_eight_easy_steps_An_annotated_reading_list</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.atitle=How%20to%20become%20a%20Bayesian%20in%20eight%20easy%20steps%3A%20An%20annotated%20reading%20list&amp;rft.jtitle=ResearchGate&amp;rft.aufirst=Alexander&amp;rft.aulast=Etz&amp;rft.au=Alexander%20Etz&amp;rft.au=Quentin%20F.%20Gronau&amp;rft.au=Fabian%20Dablander&amp;rft.au=Peter%20A.%20Edelsbrunner&amp;rft.au=Beth%20Baribault&amp;rft.date=2016-05-06"></span>
+  <div class="csl-entry">Kruschke, J. K. (2013). Bayesian estimation supersedes the t test. <i>Journal of Experimental Psychology: General</i>, <i>142</i>(2), 573–603. https://doi.org/10.1037/a0029146</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_id=info%3Adoi%2F10.1037%2Fa0029146&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.atitle=Bayesian%20estimation%20supersedes%20the%20t%20test.&amp;rft.jtitle=Journal%20of%20Experimental%20Psychology%3A%20General&amp;rft.volume=142&amp;rft.issue=2&amp;rft.aufirst=John%20K.&amp;rft.aulast=Kruschke&amp;rft.au=John%20K.%20Kruschke&amp;rft.date=2013&amp;rft.pages=573-603&amp;rft.spage=573&amp;rft.epage=603&amp;rft.issn=1939-2222%2C%200096-3445&amp;rft.language=en"></span>
+  <div class="csl-entry">Kruschke, J. K. (2014). <i>Doing Bayesian Data Analysis: A Tutorial Introduction with R</i> (2nd Edition). Burlington, MA: Academic Press.</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_id=urn%3Aisbn%3A978-0-12-381486-9&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=book&amp;rft.btitle=Doing%20Bayesian%20Data%20Analysis%3A%20A%20Tutorial%20Introduction%20with%20R&amp;rft.place=Burlington%2C%20MA&amp;rft.publisher=Academic%20Press&amp;rft.edition=2nd%20Edition&amp;rft.aufirst=John%20K.&amp;rft.aulast=Kruschke&amp;rft.au=John%20K.%20Kruschke&amp;rft.date=2014&amp;rft.tpages=673&amp;rft.isbn=978-0-12-381486-9&amp;rft.language=en"></span>
+  <div class="csl-entry">Lakens, D. (2015, January 26). The 20% Statistician: Always use Welch’s t-test instead of Student’s t-test. Retrieved from https://daniellakens.blogspot.com/2015/01/always-use-welchs-t-test-instead-of.html</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Adc&amp;rft.type=blogPost&amp;rft.title=The%2020%25%20Statistician%3A%20Always%20use%20Welch's%20t-test%20instead%20of%20Student's%20t-test&amp;rft.identifier=https%3A%2F%2Fdaniellakens.blogspot.com%2F2015%2F01%2Falways-use-welchs-t-test-instead-of.html&amp;rft.aufirst=Daniel&amp;rft.aulast=Lakens&amp;rft.au=Daniel%20Lakens&amp;rft.date=2015-01-26"></span>
+  <div class="csl-entry">Marsman, M., &amp; Wagenmakers, E.-J. (no date). Three Insights from a Bayesian Interpretation of the One-Sided P Value. Retrieved from http://www.ejwagenmakers.com/inpress/MarsmanWagenmakersOneSidedPValue.pdf</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.atitle=Three%20Insights%20from%20a%20Bayesian%20Interpretation%20of%20the%20One-Sided%20P%20Value&amp;rft.aufirst=Maarten&amp;rft.aulast=Marsman&amp;rft.au=Maarten%20Marsman&amp;rft.au=Eric-Jan%20Wagenmakers"></span>
+  <div class="csl-entry">McElreath, R. (2016). <i>Statistical Rethinking: A Bayesian Course with Examples in R and Stan</i>. CRC Press.</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_id=urn%3Aisbn%3A978-1-4822-5346-7&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=book&amp;rft.btitle=Statistical%20Rethinking%3A%20A%20Bayesian%20Course%20with%20Examples%20in%20R%20and%20Stan&amp;rft.publisher=CRC%20Press&amp;rft.aufirst=Richard&amp;rft.aulast=McElreath&amp;rft.au=Richard%20McElreath&amp;rft.date=2016-01-05&amp;rft.tpages=485&amp;rft.isbn=978-1-4822-5346-7&amp;rft.language=en"></span>
+  <div class="csl-entry">Morey, R. D., &amp; Rouder, J. (2015). <i>BayesFactor: Computation of Bayes Factors for Common Designs</i>. Retrieved from https://CRAN.R-project.org/package=BayesFactor</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=book&amp;rft.btitle=BayesFactor%3A%20Computation%20of%20Bayes%20Factors%20for%20Common%20Designs&amp;rft.aufirst=Richard%20D.&amp;rft.aulast=Morey&amp;rft.au=Richard%20D.%20Morey&amp;rft.au=Jeffrey%20Rouder&amp;rft.date=2015"></span>
+  <div class="csl-entry">Rouder, J. N., Morey, R. D., Verhagen, J., Province, J. M., &amp; Wagenmakers, E.-J. (2016). Is There a Free Lunch in Inference? <i>Topics in Cognitive Science</i>, <i>8</i>(3), 520–547. https://doi.org/10.1111/tops.12214</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_id=info%3Adoi%2F10.1111%2Ftops.12214&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.atitle=Is%20There%20a%20Free%20Lunch%20in%20Inference%3F&amp;rft.jtitle=Topics%20in%20Cognitive%20Science&amp;rft.stitle=Top%20Cogn%20Sci&amp;rft.volume=8&amp;rft.issue=3&amp;rft.aufirst=Jeffrey%20N.&amp;rft.aulast=Rouder&amp;rft.au=Jeffrey%20N.%20Rouder&amp;rft.au=Richard%20D.%20Morey&amp;rft.au=Josine%20Verhagen&amp;rft.au=Jordan%20M.%20Province&amp;rft.au=Eric-Jan%20Wagenmakers&amp;rft.date=2016-07-01&amp;rft.pages=520-547&amp;rft.spage=520&amp;rft.epage=547&amp;rft.issn=1756-8765&amp;rft.language=en"></span>
+  <div class="csl-entry">Stan Development Team. (2016). <i>Stan: A C++ Library for Probability and Sampling, Version 2.14.1</i>. Retrieved from http://mc-stan.org/</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=book&amp;rft.btitle=Stan%3A%20A%20C%2B%2B%20Library%20for%20Probability%20and%20Sampling%2C%20Version%202.14.1&amp;rft.aulast=Stan%20Development%20Team&amp;rft.au=Stan%20Development%20Team&amp;rft.date=2016"></span>
+  <div class="csl-entry">Vuorre, M. (2016, December 5). Introduction to Data Analysis using R. Retrieved from http://blog.efpsa.org/2016/12/05/introduction-to-data-analysis-using-r/</div>
+  <span class="Z3988" title="url_ver=Z39.88-2004&amp;ctx_ver=Z39.88-2004&amp;rfr_id=info%3Asid%2Fzotero.org%3A2&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Adc&amp;rft.type=blogPost&amp;rft.title=Introduction%20to%20Data%20Analysis%20using%20R&amp;rft.description=R%20is%20a%20statistical%20programming%20language%20whose%20popularity%20is%20quickly%20overtaking%20SPSS%20and%20other%20%E2%80%9Ctraditional%E2%80%9D%20point-and-click%20software%20packages%20(Muenchen%2C%202015).%20But%20why%20would%20anyone%20use%20a%20programmin%E2%80%A6&amp;rft.identifier=http%3A%2F%2Fblog.efpsa.org%2F2016%2F12%2F05%2Fintroduction-to-data-analysis-using-r%2F&amp;rft.aufirst=Matti&amp;rft.aulast=Vuorre&amp;rft.au=Matti%20Vuorre&amp;rft.date=2016-12-05"></span>
+</div>

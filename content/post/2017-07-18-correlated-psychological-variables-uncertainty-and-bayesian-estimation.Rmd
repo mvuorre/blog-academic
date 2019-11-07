@@ -1,0 +1,373 @@
+---
+title: Correlated Psychological Variables, Uncertainty, and Bayesian Estimation
+author: Matti Vuorre
+date: '2017-07-18'
+slug: correlated-psychological-variables-uncertainty-and-bayesian-estimation
+categories:
+  - psychology
+tags:
+  - statistics
+  - psychology
+  - bayes
+  - modeling
+  - R
+  - research methods
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 2
+draft: no
+bibliography: "`r here::here('static/bibliography/blog.bib')`"
+summary: "Assessing the correlations between psychological variabless, such as abilities and improvements, is one essential goal of psychological science. However, psychological variables are usually only available to the researcher as estimated parameters in mathematical and statistical models. The parameters are often estimated from small samples of observations for each research participant, which results in uncertainty (aka sampling error) about the participant-specific parameters. Ignoring the resulting uncertainty can lead to suboptimal inferences, such as asserting findings with too much confidence. Hierarchical models alleviate this problem by accounting for each parameter's uncertainty at the person- and average levels. However, common maximum likelihood estimation methods can have difficulties converging and finding appropriate values for parameters that describe the person-level parameters' spread and correlation. In this post, I discuss how Bayesian hierarchical models solve this problem, and advocate their use in estimating psychological variables and their correlations."
+---
+
+```{r setup, include=F}
+library(knitr)
+opts_chunk$set(warning = F, 
+               message = F, 
+               cache = T, 
+               echo = F,
+               fig.width = 4, 
+               fig.height = 4)
+library(arm)
+library(mvtnorm)
+library(lme4)
+library(brms)
+library(tidyverse)
+theme_set(theme_linedraw())
+```
+
+```{r simulate-data}
+# Randomly generate intercept and slope for every participant from
+# multivariate normal distribution. set.seed() ensures same random numbers
+# whenever this script is run in sequence.
+set.seed(90210)
+
+N <- 20
+timepoints <- 4
+items <- 10
+fixefs <- c(.5, .5)
+
+cormat <- matrix(c(1, -.8, -.8, 1), 2)
+stdevs <- c(1.25, .2)
+b <- stdevs %*% t(stdevs)
+sigma <- b * cormat
+
+u <- as.data.frame(rmvnorm(N, fixefs, sigma))
+names(u) <- c("u_0", "u_1")
+u <- arrange(u, desc(u_0))
+u$id <- 1:N
+
+X <- expand.grid(Time = rep(0:(timepoints-1), each=items), id = 1:N)
+X <- merge(X, u)
+X$eta <- invlogit(X$u_0 + X$u_1 * X$Time + rnorm(nrow(X), 0, 5))
+X$Mood <- rbinom(X$eta, 1, X$eta)
+d <- as_tibble(X) %>% 
+    dplyr::select(-u_0, -u_1, -eta)
+```
+
+Assessing the correlations between psychological variabless, such as abilities and improvements, is one essential goal of psychological science. However, psychological variables are usually only available to the researcher as estimated parameters in mathematical and statistical models. The parameters are often estimated from small samples of observations for each research participant, which results in uncertainty (aka sampling error) about the participant-specific parameters. Ignoring the resulting uncertainty can lead to suboptimal inferences, such as asserting findings with too much confidence. Hierarchical models alleviate this problem by accounting for each parameter's uncertainty at the person- and average levels. However, common maximum likelihood estimation methods can have difficulties converging and finding appropriate values for parameters that describe the person-level parameters' spread and correlation. In this post, I discuss how Bayesian hierarchical models solve this problem, and advocate their use in estimating psychological variables and their correlations.
+
+# Psychological Variables
+
+Suppose you have conducted a study investigating how meditation affects people's mood over Time. You asked `r N` volunteers to fill a `r items` item questionnaire once per week. They filled the questionnaire before starting a `r timepoints-1` week course in meditation---the baseline assessment of Mood---and then `r timepoints-1` times after each weekly meditation session. There are then (at least) two psychological variables of interest: People's baseline mood, and the change in mood over time. These psychological variables can be operationalized as *parameters* in mathematical models---such as *t*-test, ANOVA, structural equation model---which are then statistically estimated from data. Furthermore, research questions may arise about the *correlations* between these parameters: For example, do people who start with a lower mood improve more? 
+
+Traditionally, the model estimation and parameter correlation steps are done separately, such as in common ANOVA and regression frameworks. In this post I would like to discuss why that is a bad idea, and show how *hierarchical models*---specifically when estimated with Bayesian methods---improve upon this method. My goal is not to provide a rigorous mathematical treatment of this problem, which is well documented in the literature [@gelman_data_2007; @rouder_hierarchical_2003]. Instead, I hope to present an advanced-introductory-level treatment of the issues, focusing on visualizing the problems and solutions.
+
+# Example data
+
+Our hypothetical questionnaire consists of `r items` yes/no questions that assess participants' mood. Each yes (coded as 1) answer indicates a positive mood response to one questionnaire item.  As usual, we have collected (simulated, this time!) the data and saved it in a file in the long format, shown below.
+
+```{r data-table, results = 'asis'}
+d %>% 
+    head(6) %>%  
+    kable(caption = "First six rows of the example data")
+```
+
+We can then visualize the data to see possible trends: How did people feel in the beginning of the study? Did their mood improve over time? First, Figure \@ref(fig:plot-data) shows that most people's mood was near 0.5 in the beginning of the study---neither happy or unhappy. Second, the figure seems to suggest that at least some people's mood improved over time (perhaps because they participated in the meditation course---we forgot to include a control group in the hypothetical study's design!) 
+
+```{r plot-data, fig.height = 6, fig.width = 7, fig.cap = "Each participant's mean Mood rating for each of the four time points."}
+d %>% 
+    ggplot(aes(Time, Mood)) +
+    stat_summary(fun.y=mean, geom="point") +
+    stat_summary(fun.y=mean, geom="line") +
+    # geom_smooth(method = "glm", se = F, method.args = list(family=binomial)) +
+    scale_y_continuous(breaks = scales::pretty_breaks(3), limits = 0:1) +
+    facet_wrap("id") +
+    theme(panel.grid = element_blank())
+```
+
+However, there is also an implicit third dimension in these data: It is possible that people whose initial mood was quite high did not benefit from meditation, whereas those who started with a low mood might have improved more. This phenomenon is sometimes called a ceiling effect---distinguishing it from regression to the mean is sometimes difficult, but I won't talk about that here. We would therefore also like to know if there is evidence of a ceiling effect in these data. But how do we quantify such effects? It seems difficult to include a parameter for such an effect in our statistical model (some regression of mood on time, for each participant). Let's take a look at how we could do this.
+
+# Possible models
+
+Our goal is to model these data to answer the following questions:
+
+1. What were people's baseline moods? How did they feel at week 0? What was the average baseline mood?
+2. How did people's mood change over time? Did they improve? What was the average change?
+3. Did those who improved least begin with the highest mood? Was there a ceiling or floor effect? *Were the baselines and changes correlated?*
+
+At this point the analyst faces a series of options (the garden of forking paths; @gelman_statistical_2014), each of which could lead to different data being passed to a different statistical model. One common option, ANOVA, would assume normally distributed data, and is excluded from consideration immediately, because we know that people answered binary questions. Furthermore, ANOVA would require collapsing the data to cell means for every participant, in order to pass the proportions to the ANOVA model. It would be more appropriate to account for the raw data with a model that respects the fact that the data are binary outcomes, and multiply measured over individuals. Such a model could be constructed, separately for each individual, as a Generalized Linear Model, such as a logistic regression:
+
+\begin{aligned}
+\text{Mood rating} &\sim Bernoulli(p) \\
+p &= \text{inverse-logit}(\eta) \\
+\eta &= u_0 + u_1\text{Time}
+\end{aligned}
+
+These equations specify that each mood rating is a random draw from a Bernoulli distribution (Binomial distribution with one trial) with probability parameter *p*. The probability parameter is an inverse-logit transformation of a linear predictor $\eta$ (eta). $\eta$, in turn, is just a sum of that person's intercept $u_0$ and coefficient for time $u_1$ (multiplied by the week of observation). For this exposition I am ignoring all subscripts for clarity.
+
+## Independent Generalized Linear Models
+
+When conducting regression analyses on repeated measures data, an old practice was to fit the model separately for each individual [@lorch_regression_1990]. More than a recommendation, this was often a computational necessity because other methods simply weren't available, or were not known in some fields of study. This model would result in `r N` intercepts ($u_0$) and slopes ($u_1$), one for each individual, shown in Table \@ref(tab:glm-coefs). 
+
+```{r estimate-independent-models}
+library(purrr)
+f <- function(x) {glm(Mood ~ Time, family = binomial(), data = x)}
+glm_coefs <- nest(d, -id) %>% 
+    mutate(model = map(data, f)) %>% 
+    mutate(tidy = map(model, broom::tidy)) %>% 
+    unnest(tidy) %>% 
+    select(id:estimate) %>% 
+    spread(term, estimate) %>% 
+    mutate(method = "Independent models")
+glm_sum <- glm_coefs %>% 
+    gather(parameter, value, `(Intercept)`, Time) %>% 
+    group_by(parameter) %>% 
+    summarise(Estimate = mean(value),
+              se = sd(value) / N)
+```
+
+```{r glm-coefs, results = 'asis'}
+glm_coefs %>% 
+    select(1:3) %>% 
+    slice(1:5) %>% 
+    kable(digits = 3,
+          caption = "Regression coefficients from independently fitted GLMs")
+```
+
+We could then solve the first and second problems by summarizing these participant-specific coefficients and testing them against zero with, say, *t*-tests. Note that this would imply fitting as many models as there are subjects, and then two more tests (one for each t-test) to assess the average-level "pseudoparameters" (mean Intercept, for example). We can intuit that fitting many models might lead to problems with multiple comparisons, false alarms, all that fun stuff. I visualize these person-level estimates in Figure \@ref(fig:independent-parameters-plot-1), where the average-level Intercept and Time coefficients are drawn as blue dots with bootstrapped 95%CIs.
+
+```{r independent-parameters-plot-1, fig.cap = "Each participant provides one data point (his or her parameter) to the average-level estimate of each parameter. The average-level parameters therefore ignore the uncertainty in the person-specific estimates. Boo!"}
+nest(d, -id) %>% 
+    mutate(model = map(data, f)) %>% 
+    mutate(tidy = map(model, broom::tidy)) %>% 
+    unnest(tidy) %>% 
+    select(id:std.error) %>% 
+    ggplot(aes(term, estimate)) +
+    geom_hline(yintercept=0) +
+    geom_point(shape = 1, position = position_jitter(h=0,w=.05)) +
+    stat_summary(fun.data = mean_cl_boot, col="blue") +
+    labs(x = "Parameter", y = "Estimate")
+```
+
+However, an additional problem arises when we focus on the third question, the possible correlation between these parameters. Although it might seem a good idea to simply correlate the intercepts and slopes, the resulting estimate of the correlation coefficient would ignore the fact that each participant-specific intercept and slope has its own associated uncertainty (standard error). Ignoring the uncertainty, in turn, could thereby produce a too narrow standard error for the correlation coefficient! Consequently, we might then assert the (non-)existence of ceiling or floor effects with too much confidence. A second problem would be that if the data were unbalanced (some people had only a few observations, others many more), the model would still weight each person's single datapoint equally. 
+
+```{r independent-parameters-plot-2, fig.cap = "A simple correlation would ignore the error bars associated with each estimated parameter. Error bars are 1 SEM."}
+ses <- nest(d, -id) %>% 
+    mutate(model = map(data, f)) %>% 
+    mutate(tidy = map(model, broom::tidy)) %>% 
+    unnest(tidy) %>% 
+    select(id:std.error, -estimate) %>% 
+    spread(term, std.error, sep = "_")
+mus <- nest(d, -id) %>% 
+    mutate(model = map(data, f)) %>% 
+    mutate(tidy = map(model, broom::tidy)) %>% 
+    unnest(tidy) %>% 
+    select(id:estimate) %>% 
+    spread(term, estimate)
+left_join(mus, ses) %>% 
+    ggplot(aes(`(Intercept)`, Time)) +
+    geom_point() +
+    geom_errorbarh(aes(xmin = `(Intercept)`-`term_(Intercept)`,
+                      xmax = `(Intercept)`+`term_(Intercept)`),
+                   size = .2) +
+    geom_errorbar(aes(ymin = Time - term_Time,
+                      ymax = Time + term_Time), size = .2) +
+    coord_cartesian(ylim = c(-.85, .85), xlim = c(-2.25, 1.5))
+```
+
+In Figure \@ref(fig:independent-parameters-plot-2) I draw a scatterplot of the person-specific Intercepts and Time slopes with error bars representing 1 standard error of the mean. Notice how large those error bars are! We wouldn't want to ignore those error bars. How, then, do we construct a model that appropriately takes into account these uncertainties?
+
+## Hierarchical GLM
+
+The "multiple-models" problem described above (ignoring the uncertainty in the person-level parameters, then using these parameters at a second level of analysis) is solved by hierarchical models (e.g. @gelman_data_2007, sometimes called multilevel models or mixed models). These models include both person-specific parameters ($u_0$s and $u_1$s from above), and average (or "population-level") parameters in one model. Essentially, the person-specific parameters are modelled as random draws from a multivariate Normal distribution, whose parameters are the average parameters, and the person-specific effects' variances and covariances. These models therefore have parameters to answer all of our three problems.
+
+We can simply expand the subject-specific model given above into a hierarchical model, which I will henceforth call a GLMM (Generalized Linear Mixed Model). In the same notation as above, this time including subscripts for person *j* and row *i* in the data, the model is now:
+
+\begin{aligned}
+\text{Mood rating} &\sim Bernoulli(p_{ji}) \\
+p_{ji} &= \text{inverse-logit}(\eta_{ji}) \\
+\eta_{ji} &= u_{0j} + u_{1j} Time_{ji}
+\end{aligned}
+
+The person-specific effects (*u*s) are modeled as multivariate normal with two means $\beta_0$ (average intercept) and $\beta_1$ (average change in mood) and covariance matrix $\Sigma$ (capital sigma). 
+
+$$
+\left[\begin{array}{c}
+u_{0j} \\ u_{1j}
+\end{array}\right] 
+\sim N( 
+\left[\begin{array}{c}
+\beta_0 \\ \beta_1
+\end{array}\right], 
+\Sigma)
+$$
+
+This model therefore answers all our three questions in one simultaneous step of inference:
+
+1. Baseline mood, how did people feel at week 0.
+    - $\beta_0$ for the average person
+    - $u_{0j}$ for person *j*
+2. Mood improvement over time.
+    - $\beta_1$ for the average person
+    - $u_{1j}$ for person *j*
+3. Possible ceiling effect: Did those who improve least begin with the highest mood?
+    - $\rho$ (correlation between $u_{0j}$s and $u_{1j}$)
+    
+The correlation parameter $\rho$ can be obtained from $\Sigma$, and directly quantifies the extent to which people's baseline moods ($u_0$s) covary with mood improvements ($u_1$s). Essentially, if we find a strongly negative $\rho$, we should be inclined to believe that individuals with higher baseline moods are less affected by the meditation exercises.
+
+## Estimating GLMM with Maximum Likelihood Methods
+
+These multilevel models are most commonly estimated with Maximum Likelihood Methods, such as ones implemented in the popular R package **lme4** [@bates_fitting_2015].
+
+```{r estimate-mle, echo = T}
+mle <- glmer(Mood ~ Time + (Time|id), family=binomial(), data = d)
+```
+
+From this model, we can then obtain the *empirical Bayes*[^eb] estimates of $u_0$s and $u_1$s
+
+```{r plot-mles, fig.cap = "Person-specific intercept (X-axis) and slope (Y-axis) parameters obtained with maximum likelihood methods."}
+mle_coefs <- coef(mle)$id %>% 
+    as_tibble() %>% 
+    rownames_to_column("id") %>% 
+    mutate(method = "GLMM (MLE)")
+mle_coefs %>%
+    ggplot(aes(`(Intercept)`, Time)) +
+    # ggplot(aes(Baseline, slope)) +
+    geom_point() +
+    facet_wrap("method") +
+    coord_cartesian(ylim = c(-.85, .85), xlim = c(-2.25, 1.5))
+```
+
+We can clearly see that something odd has happened with our attempt to estimate the person-specific parameters. In Figure \@ref(fig:plot-mles), the two person-specific parameters are perfectly correlated. This happens because the empirical Bayes estimates are conditional on components of $\Sigma$, and MLE methods can have difficulties in estimating these components, such as $\rho$. Figure \@ref(fig:profile-plot) shows the model's estimated profile for this correlation parameter: There appears a significant peak at $\rho = -1$, and because MLE works with this "best estimate" and produces person-specific effects $u_0$s and $u_1$s conditional on $\rho = -1$, the person-specific effects are perfectly negatively correlated in Figure \@ref(fig:plot-mles).
+
+```{r profile-plot, fig.cap = "Likelihood profile of $\\rho$, the parameter quantifying the correlation between person-specific Time and Intercept parameters. On the X axis are possible parameter values (this parameter must be between -1 and 1), and the Y axis shows the likelihood profile over these values."}
+# Obtain profile of model but control for failures...
+pp <- profile(mle, which = "cor_Time.(Intercept)|id", devtol = 1e-2, signames = F)
+lattice::xyplot(pp, absVal=T, ylim = c(0, 1))
+```
+
+One way to describe this situation is to say that some components of $\Sigma$ have collapsed to a boundary value, such as 0 (for the standard deviations) or -1 or 1 for $\rho$. This happens because the MLE methods target point estimates for these parameters, which may be at boundary. They therefore ignore the fact that the likelihood (or posterior distribution) may be wide and contain plausible values far from the boundary. In fact, you can see from Figure \@ref(fig:profile-plot) that something odd is happening, because the profile is not smoothly estimated. From the output below, we can see that this time, MLE has estimated $\rho$ (`Corr`) to be -1, therefore leading the person-specific parameters to form a perfect line.[^overstating]
+
+[^overstating]: This problem is especially salient when working with Generalized Linear Models, instead of Gaussian models. However, I don't wish to overstate the problem, or in any way suggest that there is a problem in how these methods work, including the **lme4** R package. The data for this example are simulated to produce this exact problem, and there are steps one could take to alleviate it: For example, you could adjust the options of the `glmer()` function.
+
+```{r}
+summary(mle)$varcor
+```
+
+So, although MLE methods took the uncertainty of the person-level parameters into account, they failed to provide reasonable estimates. Here's where Bayesian estimation, by way of using the entire posterior distribution of compenents of $\Sigma$ while estimating the *u*s, is especially helpful.
+
+## Bayesian estimation of GLMM
+
+Fortunately, Bayesian estimation of GLMMs is now made easy with various R packages, such as brms [@buerkner_brms:_2016]. The syntax is very similar to the above lme4 one:
+
+```{r estimate-bayes, cache = T, echo = T}
+bay <- brm(Mood ~ Time + (Time|id), family=bernoulli(), data = d, cores=4,
+           file = here::here("static/data/moodtimemodel"))
+```
+
+Once the model is estimated, we can then look at the estimated components of $\Sigma$:
+
+```{r estimate-bayes-2}
+# bay <- update(bay, newdata = d, cores = 4)
+summary(bay)$random$id[,1:4] %>% 
+    as.data.frame() %>% 
+    rownames_to_column("Parameter") %>% 
+    kable(digits = 2,
+           caption = "Estimated parameters (summaries of their posterior distributions) from the model fitted with Bayesian methods.")
+```
+
+Instead of the point estimates dealt to us by the MLE methods above, we now have posterior distributions for the two standard deviations and one correlation parameter. We can visualize these three parameters using the Bayesplot R package [@gabry_bayesplot:_2017]:
+
+```{r mcmc-areas, fig.cap = "Smoothed density plots of the posterior distributions of the two Standard Deviations and one Correlation parameter inside $\\Sigma$. Notice that the correlation parameter is very wide, reflecting great uncertainty in the underlying values. The vertical bars are posterior medians, and shaded areas are 80\\% Credibility Intervals."}
+library(bayesplot)
+mcmc_areas(as.data.frame(bay), 
+           regex_pars = "id__", 
+           adjust = 2, prob = .8)
+```
+
+We can now also visualize the person-specific intercepts and slopes. Figure \@ref(fig:bay-coefs) shows that the person-specific parameters are no longer perfectly correlated. 
+
+```{r bay-coefs, fig.cap = "Person-specific parameters as estimated in the Bayesian GLMM. Note that each point is the posterior mean."}
+bay_coefs <- coef(bay)$id %>% 
+    as_tibble() %>% 
+    rownames_to_column("id") %>% 
+    mutate(method = "GLMM (Bayes)")
+bay_coefs %>%
+    ggplot(aes(Estimate.Intercept, Estimate.Time)) +
+    geom_point() +
+    facet_wrap("method") +
+    coord_cartesian(ylim = c(-.85, .85), xlim = c(-2.25, 1.5))
+```
+
+With these much more realistic estimates, which also take the uncertainty at the person-level into account, we can now finally answer the third question: Did people who started with a higher mood benefit less from the meditation course? The answer to this question is given by $\rho$ (`cor(Intercept,Time)`) in Table \@ref(tab:estimate-bayes-2). Although the posterior mean is negative, the 95% Credibility Interval spans almost the entire range of values from -1 to 1. Figure \@ref(fig:bay-coefs) drives home the same point, but in visual form: Our best guess is that people with higher baseline moods benefit less from meditation, but we are very uncertain in this guess.
+
+## Comparing models
+
+Finally, let's visualize the person-specific parameters from all three methods, side-by-side. First, Figure \@ref(fig:compare-coefs) shows that the independent models method led to great dispersion among the individual-specific estimates. Although each of these estimates reflects only that person's data, they ignore the fact that the people themselves are sampled from a population of people. Therefore, it is commonly argued that information should be somehow pooled across individuals, such that the most extreme values would be attenuated toward the estimated population means [@gelman_data_2007; @gelman_why_2012; @rouder_hierarchical_2003]. This is essentially what the two panels on the right show, the person-specific estimates are "shrunk" toward their means and therefore less dispersed. "People are different, but not *that* different."
+
+It is argued that Bayesian shrinkage improves the estimates of psychological variables [@rouder_hierarchical_2003]. Although I agree, that topic is outside the scope of this post. However, I would simply like to point out that while the MLE estimates are shrunk, they are estimated conditional on the correlation parameter being estimated at the boundary (-1). The Bayesian estimates, on the other hand, experience shrinkage but have no issue of being conditionalized on a boundary value. Consequently, the should better reflect the true baseline moods and changes of the individuals in our study.
+
+```{r compare-coefs, fig.width = 7, fig.height = 3, fig.cap = "Person-specific intercepts (baseline mood) and Time-coefficients (magnitude of change) for the three candidate models. Note that both parameters are on the log-odds scale."}
+coefs <- bind_rows(glm_coefs, 
+                   mutate(mle_coefs, id = as.integer(id)), 
+                   mutate(bay_coefs, id = as.integer(id))) %>% 
+    mutate(method = paste(rep(c("A)", "B)", "C)"), each = N), method))
+coefs %>% 
+    ggplot(aes(`(Intercept)`, Time)) +
+    # ggplot(aes(Baseline, slope)) +
+    geom_point() +
+    facet_wrap("method") +
+    labs(x="Intercept", y="Slope")
+```
+
+# Conclusion
+
+Hopefully, this post has developed some visual intuition to motivate the widespread use of (Bayesian) hierarchical models, and understand their underlying logic. Hierarchical (Bayesian) models are advocated for a variety of cognitive and descriptive models in the cognitive psychology literature [@rouder_hierarchical_2003; @rouder_introduction_2005; @rouder_lognormal_2014; @rouder_signal_2007], but have been somewhat difficult to implement in practice. However, with recent advances in computational algorithms [@stan_development_team_rstan:_2016] and higher-level programming interfaces to these algorithms [@buerkner_brms:_2016], hierarchical Bayesian models are now available to applied researchers with minimal time investments to learn the tools.
+
+Consequently, I would argue that modelers (that's you) should consider Bayesian methods as their default estimation method for models estimating what I've here called "Psychological variables" [@kruschke_bayesian_2017-1; @kruschke_what_2010].
+
+Finally, I would also like to point out an implication of the foregoing to social media arguments on Bayes vs. Frequentism. These arguments almost exclusively focus on comparing the properties of Bayes Factors to *p*-values. From the perspective of this post, focusing on that issue diverts attention from a more important implication of using Bayesian statistics, which is their superior ability to estimate complex statistical models. You can, and should (I argue), use Bayesian methods even if you don't care about Bayes Factors, or are uninterested in the more philosophical differences between the two schools of thought (but interested parties may read @jaynes_probability_2003). 
+
+## Update
+
+{{% alert note %}}
+Priors are not what you think they are.
+{{% /alert %}}
+
+I received some very helpful feedback and questions from folks on Twitter. One general issue was what sort of **priors** were used in the Bayesian analysis:
+
+<blockquote class="twitter-tweet" data-conversation="none" data-lang="en"><p lang="en" dir="ltr">But this stuff is not problematic use of prior info, everyone will agree. Would be nice to read exactly what info it uses.</p>&mdash; Daniël Lakens (\@lakens) <a href="https://twitter.com/lakens/status/887519771859857409">July 19, 2017</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+
+The answer to Lakens' query, "Would be nice to read exactly what info it uses.": The estimates use info from the data, and nothing else (given the model's other features). The key point is that these models can be estimated without any user-defined prior parameters. However, Frequentist and Bayesian estimation of GLMMs both set a structure on the person-level parameters $u$ in the form of a multivariate Gaussian. The covariance matrix of this Gaussian therefore contains "prior" information on the $u$s, but the prior parameters are not set by the user. Instead, they are estimated from data---hence the label "Empirical Bayes".
+
+In the Bayesian framework, it is of course possible to set "hyper"priors on the elements of the covariance matrix. But here I didn't[^brms-priors]. It is more important to recognize that any model structure that you, the analyst, define, is "prior information" in the sense that it influences the inference you'll make. In other words, the likelihood makes a bigger difference than any priors, but is often less contested.
+
+Alexander Etz was also quick to point out potential confusions in interpreting the "average-person" estimates $\beta$ in GLMMs, and posted links to helpful papers:
+
+<blockquote class="twitter-tweet" data-conversation="none" data-lang="en"><p lang="en" dir="ltr">You must be careful interpreting betas in glmms. The marginal effects are not equal to the conditional effects due to the nonlinear link</p>&mdash; Alexander Etz (\@AlxEtz) <a href="https://twitter.com/AlxEtz/status/887649038597849089">July 19, 2017</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+
+<blockquote class="twitter-tweet" data-conversation="none" data-lang="en"><p lang="en" dir="ltr">Some lit on this: <br>- <a href="https://t.co/wSi8PHJ2OK">https://t.co/wSi8PHJ2OK</a><br>- <a href="https://t.co/pTqN5dkF2l">https://t.co/pTqN5dkF2l</a><br>- <a href="https://t.co/WCcxcERpGX">https://t.co/WCcxcERpGX</a></p>&mdash; Alexander Etz (\@AlxEtz) <a href="https://twitter.com/AlxEtz/status/887654821720989704">July 19, 2017</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+
+Thanks!
+
+# References
+
+[^brms-priors]: brms sets reasonable (pretty much non-informative) defaults for these, which can be taken out. For the purposes of this post, these defaults can be entirely ignored.
+[^eb]: They are called empirical Bayes estimates because each subject's estimates inform other subjects' estimates via the shared parameters of the upper level distribution ($\beta$s and components of $\Sigma$).
+

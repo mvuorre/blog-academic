@@ -1,0 +1,157 @@
+---
+title: SIPS 2017 Conference Tweets
+author: Matti Vuorre
+date: '2017-08-03'
+slug: sips-2017-conference-tweets
+categories:
+  - psychology
+tags:
+  - data visualization
+  - psychology
+  - SIPS
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 1
+draft: no
+bibliography: "/Users/Matti/Documents/vuorre.netlify.com/static/bibliography/blog.bib"
+summary: "Exploring SIPS Tweets with R."
+---
+
+
+<div id="TOC">
+<ul>
+<li><a href="#obtaining-data">Obtaining Data</a></li>
+<li><a href="#timeline-of-tweets">Timeline of Tweets</a></li>
+<li><a href="#top-tweets">Top tweets</a></li>
+<li><a href="#top-hashtags">Top Hashtags</a></li>
+<li><a href="#who-mentioned-who-in-their-tweets">Who mentioned who in their tweets?</a></li>
+<li><a href="#references">References</a></li>
+</ul>
+</div>
+
+<p>The second annual meeting of the Society for the Improvement of Psychological Science (<a href="https://osf.io/jtcu9/">SIPS</a>) is over, sadly. The event was actively tweeted with <a href="https://twitter.com/hashtag/SIPS2017">#SIPS2017</a>, so we can use R to explore the tweets related to the conference. In this blog post, I do a small retrospective on the event by accessing and visualizing the SIPS tweets through Twitter’s API.</p>
+<div id="obtaining-data" class="section level1">
+<h1>Obtaining Data</h1>
+<p>“Accessing an API” sounds like a big deal, but fortunately <a href="https://www.youtube.com/watch?v=yhTerzNFLbo">there’s an R package for that</a>. I used the <strong>rtweet</strong> package <span class="citation">(Kearney 2017)</span> to download 2829 tweets with the #SIPS2017 hashtag. I saved the resulting data, which can be loaded with the following R command:</p>
+<pre class="r"><code>load(here::here(&quot;static/data/sips-2017-twitter.rda&quot;))</code></pre>
+</div>
+<div id="timeline-of-tweets" class="section level1">
+<h1>Timeline of Tweets</h1>
+<p>The timeline of tweets reveals that SIPSers were most active on Twitter on Monday, and there’s a clear spike of activity at 6pm on Monday.</p>
+<p><img src="/post/2017-08-03-sips-2017-conference-tweets_files/figure-html/unnamed-chunk-1-1.png" width="672" /></p>
+</div>
+<div id="top-tweets" class="section level1">
+<h1>Top tweets</h1>
+<p>Here are the top 5 SIPS non-retweets.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:left;">
+screen_name
+</th>
+<th style="text-align:left;">
+created_at
+</th>
+<th style="text-align:right;">
+retweets
+</th>
+<th style="text-align:left;">
+text
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+StuartJRitchie
+</td>
+<td style="text-align:left;">
+2017-08-01 20:15:42
+</td>
+<td style="text-align:right;">
+107
+</td>
+<td style="text-align:left;">
+#SIPS2017 <a href="https://t.co/DQaL7KfiE8" class="uri">https://t.co/DQaL7KfiE8</a>
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+improvingpsych
+</td>
+<td style="text-align:left;">
+2017-08-01 16:46:49
+</td>
+<td style="text-align:right;">
+89
+</td>
+<td style="text-align:left;">
+Are you experiencing #SIPS2017 fomo? Join us next year: Grand Rapids, Michigan, June 23-27. Save the date &amp;amp; please RT! #SIPS2018
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+TheresaWege
+</td>
+<td style="text-align:left;">
+2017-07-31 13:36:44
+</td>
+<td style="text-align:right;">
+73
+</td>
+<td style="text-align:left;">
+The #SIPS2017 methods syllabus is an amazing resource not only if you teach. <a href="https://t.co/VLEEOtTcuC" class="uri">https://t.co/VLEEOtTcuC</a> <a href="https://t.co/d2nEONvDpD" class="uri">https://t.co/d2nEONvDpD</a>
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+lakens
+</td>
+<td style="text-align:left;">
+2017-07-31 22:25:16
+</td>
+<td style="text-align:right;">
+60
+</td>
+<td style="text-align:left;">
+News at #SIPS2017: APA will adopt open science badges for 90 journals, use PsyArXiv as pre-print server (submit from pre-print to journal)
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+siminevazire
+</td>
+<td style="text-align:left;">
+2017-07-31 22:20:27
+</td>
+<td style="text-align:right;">
+41
+</td>
+<td style="text-align:left;">
+Major announcement #1: APA will allow all journal editors to offer badges for open practices #SIPS2017 <a href="https://t.co/KPNw4op7Kf" class="uri">https://t.co/KPNw4op7Kf</a>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="top-hashtags" class="section level1">
+<h1>Top Hashtags</h1>
+<p>Here are the top hashtags people used with the SIPS hashtag.</p>
+<p><img src="/post/2017-08-03-sips-2017-conference-tweets_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+</div>
+<div id="who-mentioned-who-in-their-tweets" class="section level1">
+<h1>Who mentioned who in their tweets?</h1>
+<p>And finally the obligatory graph: Arrows represent tweets going from someone to someone else.</p>
+<p><img src="/post/2017-08-03-sips-2017-conference-tweets_files/figure-html/unnamed-chunk-4-1.png" width="1152" /></p>
+<p>You’ll find the full source code of this blog post on my <a href="https://github.com/mvuorre/blog">GitHub page</a>.</p>
+</div>
+<div id="references" class="section level1 unnumbered">
+<h1>References</h1>
+<div id="refs" class="references">
+<div id="ref-rtweet-package">
+<p>Kearney, Michael W. 2017. <em>Rtweet: Collecting Twitter Data</em>. <a href="https://cran.r-project.org/package=rtweet">https://cran.r-project.org/package=rtweet</a>.</p>
+</div>
+</div>
+</div>

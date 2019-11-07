@@ -1,0 +1,99 @@
+---
+title: 'rpihkal: Combine ggplots with patchwork'
+author: Matti Vuorre
+date: '2018-12-13'
+slug: rpihkal-combine-ggplots-with-patchwork
+categories:
+  - data science
+tags:
+  - data visualization
+  - ggplot2
+  - R
+  - rpihkal
+image:
+  caption: ''
+  focal_point: ''
+subtitle: 'How to combine arbitrary ggplots'
+output:
+  blogdown::html_page:
+    toc: yes
+    number_sections: no
+    toc_depth: 2
+    df_print: paged
+summary: 'patchwork is an R package with a powerful syntax for combining different ggplots into a single figure.'
+bibliography: "/Users/Matti/Documents/vuorre.netlify.com/static/bibliography/blog.bib"
+---
+
+<link href="/rmarkdown-libs/pagedtable/css/pagedtable.css" rel="stylesheet" />
+<script src="/rmarkdown-libs/pagedtable/js/pagedtable.js"></script>
+
+<div id="TOC">
+<ul>
+<li><a href="#facetting-figures-into-small-multiples">Facetting figures into small multiples</a></li>
+<li><a href="#combining-arbitrary-ggplots">Combining arbitrary ggplots</a></li>
+<li><a href="#patchwork">Patchwork</a></li>
+</ul>
+</div>
+
+<hr />
+<p><a href="https://ggplot2.tidyverse.org/">ggplot2</a> is the best R package for data visualization, and has powerful features for “facetting” plots into small multiples based on categorical variables.</p>
+<div id="facetting-figures-into-small-multiples" class="section level2">
+<h2>Facetting figures into small multiples</h2>
+<p>This “facetting” is useful for showing the same figure, e.g. a bivariate relationship, at multiple levels of some other variable</p>
+<pre class="r"><code>library(tidyverse)
+ggplot(mtcars, aes(mpg, disp)) +
+  geom_point() +
+  facet_wrap(&quot;cyl&quot;)</code></pre>
+<p><img src="/post/2018-12-13-rpihkal-combine-ggplots-with-patchwork_files/figure-html/unnamed-chunk-1-1.png" width="672" /></p>
+<p>But if you would like to get a figure that consists of multiple panels of unrelated plots—with different variables on the X and Y axes, potentially from different data sources—things become more complicated.</p>
+</div>
+<div id="combining-arbitrary-ggplots" class="section level2">
+<h2>Combining arbitrary ggplots</h2>
+<p>Say you have these three figures</p>
+<pre class="r"><code>p &lt;- ggplot(mtcars)
+  
+a &lt;- p +
+  aes(mpg, disp, col = as.factor(vs)) +
+  geom_smooth(se = F) +
+  geom_point()
+
+b &lt;- p + 
+  aes(disp, gear, group = gear) +
+  ggstance::geom_boxploth()
+
+c &lt;- p +
+  aes(hp) +
+  stat_density(geom = &quot;area&quot;) +
+  coord_cartesian(expand = 0)</code></pre>
+<p>How would you go about combining them? There are a few options, such as <code>grid.arrange()</code> in the <a href="https://cran.r-project.org/web/packages/gridExtra/index.html">gridExtra</a> package, and <code>plot_grid()</code> in the <a href="https://cran.r-project.org/web/packages/cowplot/vignettes/plot_grid.html">cowplot</a> package. Today, I’ll point out a newer package that introduces a whole new syntax for combining together, <a href="https://github.com/thomasp85/patchwork">patchwork</a>.</p>
+</div>
+<div id="patchwork" class="section level2">
+<h2>Patchwork</h2>
+<p>patchwork is not yet on CRAN, so install it from GitHub:</p>
+<pre class="r"><code># install.packages(&quot;devtools&quot;)
+devtools::install_github(&quot;thomasp85/patchwork&quot;)</code></pre>
+<p>Once you load the package, you can add ggplots together by adding them with <code>+</code>:</p>
+<pre class="r"><code>library(patchwork)
+a + b + c</code></pre>
+<p><img src="/post/2018-12-13-rpihkal-combine-ggplots-with-patchwork_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>Basically, you can add ggplots together as if they were geoms inside a single ggplot. However, there’s more. <code>|</code> specifies side-by-side addition</p>
+<pre class="r"><code>a | c</code></pre>
+<p><img src="/post/2018-12-13-rpihkal-combine-ggplots-with-patchwork_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>And <code>/</code> is for adding plots under the previous plot</p>
+<pre class="r"><code>b / c</code></pre>
+<p><img src="/post/2018-12-13-rpihkal-combine-ggplots-with-patchwork_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>These operators can be used to flexibly compose figures from multiple components, using parentheses to group plots and <code>+</code>, <code>|</code>, and <code>/</code> to add the groups together</p>
+<pre class="r"><code>(a | b) / c</code></pre>
+<p><img src="/post/2018-12-13-rpihkal-combine-ggplots-with-patchwork_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>Use <code>plot_annotation()</code> to add tags, and <code>&amp;</code> to pass theme elements to all plot elements in a composition</p>
+<pre class="r"><code>(a | b) / c + 
+  plot_annotation(tag_levels = &quot;A&quot;) &amp; 
+  theme(legend.position = &quot;none&quot;)</code></pre>
+<div class="figure"><span id="fig:unnamed-chunk-8"></span>
+<img src="/post/2018-12-13-rpihkal-combine-ggplots-with-patchwork_files/figure-html/unnamed-chunk-8-1.png" alt="Tweak this a little bit and throw it in a manuscript." width="672" />
+<p class="caption">
+Figure 1: Tweak this a little bit and throw it in a manuscript.
+</p>
+</div>
+<p>There are many more examples on <a href="https://github.com/thomasp85/patchwork">patchwork’s GitHub page</a>. I’ve found this package more useful in composing figures out of multiple plots than its alternatives, mainly because of the concise but powerful syntax.</p>
+</div>

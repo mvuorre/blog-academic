@@ -1,0 +1,316 @@
+---
+title: "Meta-analysis is a special case of Bayesian multilevel modeling"
+author: "Matti Vuorre"
+date: 2016-09-29
+description: "Bayesian Meta-Analysis with R, Stan & brms"
+categories: ["statistics"]
+tags: ["R", "bayes", "tutorial", "brms"]
+---
+
+
+
+<script type="text/javascript" async
+src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-MML-AM_CHTML">
+</script>
+<div id="introduction" class="section level1">
+<h1>Introduction</h1>
+<p>Hello everybody! Recently, there’s been a lot of talk about meta-analysis, and here I would just like to quickly show that Bayesian multilevel modeling nicely takes care of your meta-analysis needs, and that it is easy to do in R with the rstan and brms packages. As you’ll see, meta-analysis is a special case of Bayesian multilevel modeling when you are unable or unwilling to put a prior distribution on the meta-analytic effect size estimate.</p>
+<p>The idea for this post came from Wolfgang Viechtbauer’s <a href="http://www.metafor-project.org/doku.php/tips:rma_vs_lm_lme_lmer?s%5B%5D=lme4">website</a>, where he compared results for meta-analytic models fitted with his great (frequentist) package <a href="http://www.metafor-project.org/doku.php/metafor">metafor</a> and the swiss army knife of multilevel modeling, <a href="https://cran.r-project.org/web/packages/lme4/index.html">lme4</a>. It turns out that even though you can fit meta-analytic models with lme4, the results are slightly different from traditional meta-analytic models, because the experiment-wise variances are treated slightly differently.</p>
+<p>Here are the packages we’ll be using:</p>
+<pre class="r"><code>library(metafor)
+library(lme4)
+library(brms)
+library(tidyverse)</code></pre>
+</div>
+<div id="the-data" class="section level1">
+<h1>The data</h1>
+<p>Here I’ll only focus on a simple random effects meta-analysis of effect sizes, and will use the same example data as in the aforementioned <a href="http://www.metafor-project.org/doku.php/tips:rma_vs_lm_lme_lmer?s%5B%5D=lme4">website</a>. The data are included in the metafor package, and describe the relationship between conscientiousness and medication adherence. The effect sizes are r to z transformed correlations.</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">study</th>
+<th align="right">year</th>
+<th align="right">ni</th>
+<th align="right">ri</th>
+<th align="right">yi</th>
+<th align="right">vi</th>
+<th align="right">sei</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Axelsson et al. (2009)</td>
+<td align="right">2009</td>
+<td align="right">109</td>
+<td align="right">0.19</td>
+<td align="right">0.19</td>
+<td align="right">0.01</td>
+<td align="right">0.10</td>
+</tr>
+<tr class="even">
+<td align="left">Axelsson et al. (2011)</td>
+<td align="right">2011</td>
+<td align="right">749</td>
+<td align="right">0.16</td>
+<td align="right">0.16</td>
+<td align="right">0.00</td>
+<td align="right">0.04</td>
+</tr>
+<tr class="odd">
+<td align="left">Bruce et al. (2010)</td>
+<td align="right">2010</td>
+<td align="right">55</td>
+<td align="right">0.34</td>
+<td align="right">0.35</td>
+<td align="right">0.02</td>
+<td align="right">0.14</td>
+</tr>
+<tr class="even">
+<td align="left">Christensen et al. (1995)</td>
+<td align="right">1995</td>
+<td align="right">72</td>
+<td align="right">0.27</td>
+<td align="right">0.28</td>
+<td align="right">0.01</td>
+<td align="right">0.12</td>
+</tr>
+<tr class="odd">
+<td align="left">Christensen et al. (1999)</td>
+<td align="right">1999</td>
+<td align="right">107</td>
+<td align="right">0.32</td>
+<td align="right">0.33</td>
+<td align="right">0.01</td>
+<td align="right">0.10</td>
+</tr>
+<tr class="even">
+<td align="left">Cohen et al. (2004)</td>
+<td align="right">2004</td>
+<td align="right">65</td>
+<td align="right">0.00</td>
+<td align="right">0.00</td>
+<td align="right">0.02</td>
+<td align="right">0.13</td>
+</tr>
+<tr class="odd">
+<td align="left">Dobbels et al. (2005)</td>
+<td align="right">2005</td>
+<td align="right">174</td>
+<td align="right">0.18</td>
+<td align="right">0.18</td>
+<td align="right">0.01</td>
+<td align="right">0.08</td>
+</tr>
+<tr class="even">
+<td align="left">Ediger et al. (2007)</td>
+<td align="right">2007</td>
+<td align="right">326</td>
+<td align="right">0.05</td>
+<td align="right">0.05</td>
+<td align="right">0.00</td>
+<td align="right">0.06</td>
+</tr>
+<tr class="odd">
+<td align="left">Insel et al. (2006)</td>
+<td align="right">2006</td>
+<td align="right">58</td>
+<td align="right">0.26</td>
+<td align="right">0.27</td>
+<td align="right">0.02</td>
+<td align="right">0.13</td>
+</tr>
+<tr class="even">
+<td align="left">Jerant et al. (2011)</td>
+<td align="right">2011</td>
+<td align="right">771</td>
+<td align="right">0.01</td>
+<td align="right">0.01</td>
+<td align="right">0.00</td>
+<td align="right">0.04</td>
+</tr>
+<tr class="odd">
+<td align="left">Moran et al. (1997)</td>
+<td align="right">1997</td>
+<td align="right">56</td>
+<td align="right">-0.09</td>
+<td align="right">-0.09</td>
+<td align="right">0.02</td>
+<td align="right">0.14</td>
+</tr>
+<tr class="even">
+<td align="left">O’Cleirigh et al. (2007)</td>
+<td align="right">2007</td>
+<td align="right">91</td>
+<td align="right">0.37</td>
+<td align="right">0.39</td>
+<td align="right">0.01</td>
+<td align="right">0.11</td>
+</tr>
+<tr class="odd">
+<td align="left">Penedo et al. (2003)</td>
+<td align="right">2003</td>
+<td align="right">116</td>
+<td align="right">0.00</td>
+<td align="right">0.00</td>
+<td align="right">0.01</td>
+<td align="right">0.09</td>
+</tr>
+<tr class="even">
+<td align="left">Quine et al. (2012)</td>
+<td align="right">2012</td>
+<td align="right">537</td>
+<td align="right">0.15</td>
+<td align="right">0.15</td>
+<td align="right">0.00</td>
+<td align="right">0.04</td>
+</tr>
+<tr class="odd">
+<td align="left">Stilley et al. (2004)</td>
+<td align="right">2004</td>
+<td align="right">158</td>
+<td align="right">0.24</td>
+<td align="right">0.24</td>
+<td align="right">0.01</td>
+<td align="right">0.08</td>
+</tr>
+<tr class="even">
+<td align="left">Wiebe &amp; Christensen (1997)</td>
+<td align="right">1997</td>
+<td align="right">65</td>
+<td align="right">0.04</td>
+<td align="right">0.04</td>
+<td align="right">0.02</td>
+<td align="right">0.13</td>
+</tr>
+</tbody>
+</table>
+<p>Here’s what these data look like (point estimates +- 2 SEM):</p>
+<pre class="r"><code>library(ggplot2)
+ggplot(dat, aes(x=yi, y=study)) +
+  geom_segment(aes(x = yi-sei*2, xend = yi+sei*2, y=study, yend=study)) +
+  geom_point()</code></pre>
+<p><img src="/post/2016-09-29-bayesian-meta-analysis_files/figure-html/plot-fake-data-1.png" width="864" style="display: block; margin: auto;" /></p>
+</div>
+<div id="the-model" class="section level1">
+<h1>The model</h1>
+<p>We are going to fit a random-effects meta-analysis model to these observed effect sizes and their standard errors.</p>
+<p>Here’s what this model looks like, loosely following notation from the R package Metafor (Viechtbauer, 2010) manual (p.6):</p>
+<p><span class="math display">\[y_i \sim N(\theta_i, \sigma_i^2)\]</span></p>
+<p>where each recorded effect size, <span class="math inline">\(y_i\)</span> is a draw from a normal distribution which is centered on that study’s “true” effect size <span class="math inline">\(\theta_i\)</span> and has standard deviation equal to the study’s observed standard error <span class="math inline">\(\sigma_i\)</span>.</p>
+<p>Our next set of assumptions is that the studies’ true effect sizes approximate some underlying effect size in the (hypothetical) population of all studies. We call this underlying population effect size <span class="math inline">\(\mu\)</span>, and its standard deviation <span class="math inline">\(\tau\)</span>, such that the true effect sizes are thus distributed:</p>
+<p><span class="math display">\[\theta_i \sim N(\mu, \tau^2)\]</span></p>
+<p>We now have two really interesting parameters: <span class="math inline">\(\mu\)</span> tells us, all else being equal, what I may expect the “true” effect to be, in the population of similar studies. <span class="math inline">\(\tau\)</span> tells us how much individual studies of this effect vary.</p>
+<p>I think it is most straightforward to write this model as yet another mixed-effects model (metafor manual p.6):</p>
+<p><span class="math display">\[y_i \sim N(\mu + \theta_i, \sigma^2_i)\]</span></p>
+<p>where <span class="math inline">\(\theta_i \sim N(0, \tau^2)\)</span>, studies’ true effects are normally distributed with between-study heterogeneity <span class="math inline">\(\tau^2\)</span>. The reason this is a little confusing (to me at least), is that we know the <span class="math inline">\(\sigma_i\)</span>s (this being the fact that separates meta-analysis from other more common regression modeling).</p>
+<div id="estimation-with-metafor" class="section level2">
+<h2>Estimation with metafor</h2>
+<p>Super easy!</p>
+<pre class="r"><code>library(metafor)
+ma_out &lt;- rma(data = dat, yi = yi, sei = sei, slab = dat$study)
+summary(ma_out)</code></pre>
+<pre><code># 
+# Random-Effects Model (k = 16; tau^2 estimator: REML)
+# 
+#   logLik  deviance       AIC       BIC      AICc  
+#   8.6096  -17.2191  -13.2191  -11.8030  -12.2191  
+# 
+# tau^2 (estimated amount of total heterogeneity): 0.0081 (SE = 0.0055)
+# tau (square root of estimated tau^2 value):      0.0901
+# I^2 (total heterogeneity / total variability):   61.73%
+# H^2 (total variability / sampling variability):  2.61
+# 
+# Test for Heterogeneity: 
+# Q(df = 15) = 38.1595, p-val = 0.0009
+# 
+# Model Results:
+# 
+# estimate      se    zval    pval   ci.lb   ci.ub     
+#   0.1499  0.0316  4.7501  &lt;.0001  0.0881  0.2118  ***
+# 
+# ---
+# Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1</code></pre>
+</div>
+</div>
+<div id="the-switch-to-bayes" class="section level1">
+<h1>The switch to Bayes</h1>
+<p>So far so good, we’re strictly in the realm of standard meta-analysis. But I would like to propose that instead of using custom meta-analysis software, we simply consider the above model as just another regression model, and fit it like we would any other (multilevel) regression model. That is, using <a href="http://mc-stan.org/">Stan</a>, usually through the <a href="https://cran.r-project.org/package=brms">brms</a> interface. Going Bayesian allows us to assign prior distributions on the population-level parameters <span class="math inline">\(\mu\)</span> and <span class="math inline">\(\tau\)</span>, and we would usually want to use some very mildly regularizing priors. Here, to make the results most comparable, I’ll use uniform (non-informative) priors:</p>
+<p><span class="math display">\[\mu \sim U(-\infty, \infty)\]</span></p>
+<p>and</p>
+<p><span class="math display">\[\tau \sim U(0, 1000)\]</span></p>
+<div id="estimation-with-brms" class="section level2">
+<h2>Estimation with brms</h2>
+<p>Here’s how to fit this model with brms:</p>
+<pre class="r"><code>library(brms)
+brm_out &lt;- brm(
+  yi | se(sei) ~ 1 + (1 | study), 
+  prior = set_prior(&quot;uniform(0, 1000)&quot;, class = &quot;sd&quot;),
+  data = dat, 
+  cores = 4,
+  file = here::here(&quot;static/data/metaanalysismodel&quot;)
+)</code></pre>
+<pre><code>#  Family: gaussian 
+#   Links: mu = identity; sigma = identity 
+# Formula: yi | se(sei) ~ 1 + (1 | study) 
+#    Data: d (Number of observations: 15) 
+# Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+#          total post-warmup samples = 4000
+# 
+# Group-Level Effects: 
+# ~study (Number of levels: 15) 
+#               Estimate Est.Error l-95% CI u-95% CI Eff.Sample Rhat
+# sd(Intercept)     0.17      0.11     0.01     0.41        946 1.00
+# 
+# Population-Level Effects: 
+#           Estimate Est.Error l-95% CI u-95% CI Eff.Sample Rhat
+# Intercept     0.13      0.07    -0.01     0.28       1447 1.00
+# 
+# Samples were drawn using sampling(NUTS). For each parameter, Eff.Sample 
+# is a crude measure of effective sample size, and Rhat is the potential 
+# scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>These results are the same as the ones obtained with metafor.</p>
+</div>
+</div>
+<div id="comparing-results" class="section level1">
+<h1>Comparing results</h1>
+<p>We can now compare the results of these two estimation methods. Of course, the Bayesian method has a tremendous advantage, because it results in an actual distribution of plausible values, whereas the frequentist method gives us just point estimates.</p>
+<p><img src="/post/2016-09-29-bayesian-meta-analysis_files/figure-html/unnamed-chunk-4-1.png" width="864" style="display: block; margin: auto;" />
+<em>Figure 1.</em> Histogram of samples from the posterior distribution of <span class="math inline">\(\mu\)</span> (top left) and <span class="math inline">\(\tau\)</span> (top right). Bottom left displays the multivariate posterior distribution of <span class="math inline">\(\mu\)</span> (x-axis) and <span class="math inline">\(\tau\)</span> (y-axis), light colors indicating increased plausibility of values. For each plot, the dashed lines display the maximum likelihood point estimate, and 95% confidence limits (only the point estimate is displayed for the multivariate figure.)</p>
+<p>We can see from the numeric output, and especially the figures, that these modes of inference yield the same numerical results. Keep in mind though, that the Bayesian estimates actually allow you to discuss probabilities, and generally the things that we’d like to discuss when talking about results.</p>
+<p>For example, what is the probability that the average effect size is greater than 0.2?</p>
+<pre class="r"><code>avg_es &lt;- as.data.frame(brm_out, pars = &quot;b_&quot;)[,1]
+cat( (sum(avg_es &gt; 0.2) / length(avg_es))*100, &quot;%&quot;)</code></pre>
+<pre><code># 14.6 %</code></pre>
+<div id="forest-plot" class="section level2">
+<h2>Forest plot</h2>
+<p>We can draw a forest plot of the results using the <a href="https://mvuorre.github.io/brmstools/reference/forest.html"><code>forest()</code></a> function in the <a href="https://github.com/mvuorre/brmstools">brmstools</a> package:</p>
+<pre class="r"><code>library(brmstools)
+forest(brm_out,
+       show_data = TRUE,
+       av_name = &quot;Effect size&quot;)</code></pre>
+<p><img src="/post/2016-09-29-bayesian-meta-analysis_files/figure-html/draw-forest-plot-1.png" width="864" style="display: block; margin: auto;" /></p>
+<p>This forest plot displays the entire posterior distribution of each <span class="math inline">\(\theta_i\)</span>. The meta-analytic effect size <span class="math inline">\(\mu\)</span> is also displayed in the bottom row. The mean and 95% CI limits of the posteriors are also displayed on the right in text form for all you precision fans. The plot also shows each study’s <em>observed</em> mean effect size as an empty circle.</p>
+<p>Focus on Moran et al. (1997)’s observed effect size (the empty circle): This is an anomalous result compared to all other studies. One might describe it as <em>incredible</em>, and that is indeed what the bayesian estimation procedure has done, and the resulting posterior distribution is no longer equivalent to the observed effect size. Instead, it is shrunken toward the average effect size. Now look at the table above, this study only had 56 participants, so we <em>should</em> be more skeptical of this study’s observed ES, and perhaps we <em>should</em> then adjust our beliefs about this study in the context of other studies. Therefore, our best guess about this study’s effect size, <em>given all the other studies</em> is no longer the observed mean, but something closer to the average across the studies.</p>
+<p>If this shrinkage business seems radical, consider Quine et al. (2012). This study had a much greater sample size (537), and therefore a smaller SE. It was also generally more in line with the average effect size estimate. Therefore, the observed mean ES and the mean of the posterior distribution are pretty much identical. This is also a fairly desirable feature.</p>
+</div>
+</div>
+<div id="discussion" class="section level1">
+<h1>Discussion</h1>
+<p>The way these different methods are presented (regression, meta-analysis, ANOVA, …), it is quite easy for a beginner, like me, to lose sight of the forest for the trees. I also feel that this is a general experience for students of applied statistics: Every experiment, situation, and question results in a different statistical method (or worse: “Which test should I use?”), and the student doesn’t see how the methods relate to each other. So I think focusing on the (regression) model is key, but often overlooked in favor of this sort of decision tree model of choosing statistical methods (McElreath, 2016, p.2).</p>
+<p>Accordingly, I think we’ve ended up in a situation where meta-analysis, for example, is seen as somehow separate from all the other modeling we do, such as repeated measures t-tests. In fact I think applied statistics in Psychology may too often appear as an unconnected bunch of tricks and models, leading to confusion and inefficient implementation of appropriate methods.</p>
+<div id="bayesian-multilevel-modeling" class="section level2">
+<h2>Bayesian multilevel modeling</h2>
+<p>As I’ve been learning more about statistics, I’ve often noticed that some technique, applied in a specific set of situations, turns out to be a special case of a more general modeling approach. I’ll call this approach here <em>Bayesian multilevel modeling</em>, and won’t say much more than that it’s awesome (Gelman et al., 2013; McElreath, 2016). If you are forced to choose one statistical method to learn, it should be Bayesian multilevel modeling, because it allows you to do and understand most things, and allows you to see how similar all these methods are, under the hood.</p>
+<p>Have a nice day.</p>
+<p>[Post edited: Use <code>brmstools::forest()</code>, instead of custom ggplot figure.]</p>
+</div>
+</div>
+<div id="bibliography" class="section level1">
+<h1>Bibliography</h1>
+<p>Buerkner, P.-C. (2016). brms: Bayesian Regression Models using Stan. Retrieved from <a href="http://CRAN.R-project.org/package=brms" class="uri">http://CRAN.R-project.org/package=brms</a></p>
+<p>Gelman, A., Carlin, J. B., Stern, H. S., Dunson, D. B., Vehtari, A., &amp; Rubin, D. B. (2013). Bayesian Data Analysis, Third Edition. Boca Raton: Chapman and Hall/CRC.</p>
+<p>McElreath, R. (2016). Statistical Rethinking: A Bayesian Course with Examples in R and Stan. CRC Press.</p>
+<p>Stan Development Team. (2016). Stan: A C++ Library for Probability and Sampling, Version 2.11.1. Retrieved from <a href="http://mc-stan.org/" class="uri">http://mc-stan.org/</a></p>
+<p>Viechtbauer, W. (2010). Conducting meta-analyses in R with the metafor package. Journal of Statistical Software, 36(3), 1–48.</p>
+<p>Wickham, H. (2009). ggplot2: Elegant Graphics for Data Analysis. Springer Science &amp; Business Media.</p>
+</div>

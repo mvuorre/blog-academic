@@ -1,0 +1,287 @@
+---
+title: Bayesian Estimation of Signal Detection Models, Part 3
+author: Matti Vuorre
+date: '2017-10-16'
+slug: bayesian-estimation-of-signal-detection-theory-models-part-3
+categories:
+  - psychology
+  - statistics
+tags:
+  - bayes
+  - brms
+  - modeling
+  - psychology
+  - R
+  - statistics
+  - tutorial
+draft: no
+output:
+  blogdown::html_page:
+    toc: yes
+    number_sections: no
+    toc_depth: 2
+summary: (This post is part 3 in a series of blog posts discussing Bayesian estimation of Signal Detection models.) In this post, we extend the EVSDT model to confidence rating responses, and estimate the resulting model as an ordinal probit regression. I also describe how to estimate the unequal variance Gaussian SDT model for a single participant. I provide a software implementation in R.
+bibliography: "/Users/Matti/Documents/vuorre.netlify.com/static/bibliography/blog.bib"
+---
+
+
+<div id="TOC">
+<ul>
+<li><a href="#introduction">Introduction</a><ul>
+<li><a href="#example-data-rating-task">Example data: Rating task</a></li>
+</ul></li>
+<li><a href="#evsdt-one-subjects-rating-responses">EVSDT: one subject’s rating responses</a></li>
+<li><a href="#uvsdt-one-subjects-rating-responses">UVSDT: one subject’s rating responses</a></li>
+<li><a href="#references">References</a></li>
+</ul>
+</div>
+
+<p>This post is the third part in a series of blog posts on Signal Detection models: In the first part, I described how to estimate the equal variance Gaussian SDT (EVSDT) model for a single participant, using Bayesian (generalized linear and nonlinear) modeling techniques. In the second part, I described how to estimate the equal variance Gaussian SDT model for multiple participants simultaneously, using hierarchical Bayesian models.</p>
+<p>In this blog post, I extend the discussion to rating tasks and then show how to estimate equal- and unequal variance Gaussian SDT (UVSDT) models with Bayesian methods, using R and the brms package <span class="citation">(Bürkner 2017; R Core Team 2017)</span>. Here, we focus on estimating the model for a single participant. In the next blog post, we discuss hierarchical models for multiple participants.</p>
+<div id="introduction" class="section level1">
+<h1>Introduction</h1>
+<div id="example-data-rating-task" class="section level2">
+<h2>Example data: Rating task</h2>
+<p>We begin with a brief discussion of the rating task, with example data from <span class="citation">Decarlo (2003)</span>. In previous posts, we discussed signal detection experiments where the item was either old or new, and participants provided binary “old!” or “new!” responses. Here, we move to a slight modification of this task, where participants are allowed to express their certainty: On each trial, the presented item is still old or new, but participants now <em>rate their confidence</em> in whether the item was old or new. For example, and in the data below, participants can answer with numbers indicating their confidence that the item is old: 1 = Definitely new, …, 6 = Definitely old.</p>
+<p>One interpretation of the resulting data is that participants set a number of criteria for the confidence ratings, such that greater evidence is required for 6-responses, than 4-responses, for example. That is, there will be different criteria for responding “definitely new”, “maybe new”, and so forth. However, the participant’s underlying discriminability should remain unaffected.</p>
+<p>The example data is shown in a summarised form below (counts of responses for each confidence bin, for both old (<code>isold</code> = 1) and new trial types <span class="citation">(Decarlo 2003)</span>):</p>
+<pre class="r"><code>library(tidyverse)
+dsum &lt;- tibble(
+    isold = c(0,0,0,0,0,0,1,1,1,1,1,1),
+    y = c(1:6, 1:6),
+    count = c(174, 172, 104, 92, 41, 8, 46, 57, 66, 101, 154, 173)
+)
+dsum</code></pre>
+<pre><code>## # A tibble: 12 x 3
+##    isold     y count
+##    &lt;dbl&gt; &lt;int&gt; &lt;dbl&gt;
+##  1     0     1   174
+##  2     0     2   172
+##  3     0     3   104
+##  4     0     4    92
+##  5     0     5    41
+##  6     0     6     8
+##  7     1     1    46
+##  8     1     2    57
+##  9     1     3    66
+## 10     1     4   101
+## 11     1     5   154
+## 12     1     6   173</code></pre>
+<p>However, one overarching theme of these blog posts is the idea that we don’t need to summarise data to counts (or cell means, or the like), but can and perhaps should instead work with raw responses, as provided by the experimental program. Working with such trial-level data is, I think, computationally and conceptually easier, especially when we wish to include covariates. Here is the data in the raw trial-level format:</p>
+<pre class="r"><code>d &lt;- tibble(
+    isold = c(rep(0, 174), rep(0, 172), rep(0, 104), rep(0, 92), rep(0, 41), rep(0, 8),
+          rep(1, 46), rep(1, 57), rep(1, 66), rep(1, 101), rep(1, 154), rep(1, 173)),
+    y = c(rep(1, 174), rep(2, 172), rep(3, 104), rep(4, 92), rep(5, 41), rep(6, 8),
+          rep(1, 46), rep(2, 57), rep(3, 66), rep(4, 101), rep(5, 154), rep(6, 173))
+)
+d</code></pre>
+<pre><code>## # A tibble: 1,188 x 2
+##    isold     y
+##    &lt;dbl&gt; &lt;dbl&gt;
+##  1     0     1
+##  2     0     1
+##  3     0     1
+##  4     0     1
+##  5     0     1
+##  6     0     1
+##  7     0     1
+##  8     0     1
+##  9     0     1
+## 10     0     1
+## # ... with 1,178 more rows</code></pre>
+<p>(The code above is pretty ugly. If anybody knows of a tidy way of getting from the summarised data to a trial-level representation, please let me know.) If you want to follow along on your own computer, you can execute the above lines in R.</p>
+<p>We can now proceed to fit the SDT models to this person’s data, beginning with the EVSDT model.</p>
+</div>
+</div>
+<div id="evsdt-one-subjects-rating-responses" class="section level1">
+<h1>EVSDT: one subject’s rating responses</h1>
+<p>Recall that for the EVSDT model of binary responses, we modeled the probability <em>p</em> (of responding “old!” on trial <em>i</em>) as</p>
+<p><span class="math display">\[p_i = \Phi(d&#39;\mbox{isold}_i - c)\]</span></p>
+<p>This model gives the (z-scored) probability of responding “old” for new items (<em>c</em> = zFAR), and the increase (in z-scores) in “old” responses for old items (<em>d’</em>). For rating data, the model is similar but we now include multiple <em>c</em>s. These index the different criteria for responding with the different confidence ratings. The criteria are assumed to be ordered–people should be more lenient to say unsure old, vs. sure old, when the signal (memory strength) on that trial was weaker.</p>
+<p>The EVSDT model for rating responses models the <em>cumulative probability</em> of responding with confidence rating <em>k</em> or less (<span class="math inline">\(p(y_i \leq k_i)\)</span>; <span class="citation">Decarlo (2003)</span>):</p>
+<p><span class="math display">\[p(y_i \leq k_i) = \Phi(d&#39;\mbox{isold}_i - c_{ki})\]</span></p>
+<p>This model is also known as an ordinal probit (<span class="math inline">\(\Phi\)</span>) model, and can be fit with widely available regression modeling software. <span class="citation">(Decarlo 2003)</span> showed how to use the PLUM procedure in SPSS to fit it for a single participant. However, we can obtain Bayesian inference for this model by estimating the model with the brms package in R <span class="citation">(Bürkner 2017; Stan Development Team 2016)</span>. Ignoring prior distributions for now, the brms syntax for estimating this model with the above data is:</p>
+<pre class="r"><code>fit1 &lt;- brm(y ~ isold, 
+            family = cumulative(link=&quot;probit&quot;), 
+            data = d,
+            cores = 4,
+            file = here::here(&quot;static/data/sdtmodel3-1&quot;))</code></pre>
+<p>This model estimates an intercept (criterion) for each response category, and the effect of <code>isold</code>, which is <em>d’</em>. The model’s posterior distribution is summarised below:</p>
+<pre class="r"><code>summary(fit1)</code></pre>
+<pre><code>##  Family: cumulative 
+##   Links: mu = probit; disc = identity 
+## Formula: y ~ isold 
+##    Data: d (Number of observations: 1188) 
+## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup samples = 4000
+## 
+## Population-Level Effects: 
+##              Estimate Est.Error l-95% CI u-95% CI Eff.Sample Rhat
+## Intercept[1]    -0.44      0.05    -0.54    -0.35       4256 1.00
+## Intercept[2]     0.23      0.05     0.14     0.33       5885 1.00
+## Intercept[3]     0.67      0.05     0.57     0.77       4736 1.00
+## Intercept[4]     1.20      0.06     1.09     1.31       4620 1.00
+## Intercept[5]     1.88      0.07     1.75     2.01       4436 1.00
+## isold            1.26      0.07     1.13     1.39       4157 1.00
+## 
+## Samples were drawn using sampling(NUTS). For each parameter, Eff.Sample 
+## is a crude measure of effective sample size, and Rhat is the potential 
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>The five intercepts are the five criteria in the model, and <code>isold</code> is <em>d’</em>. I also estimated this model using SPSS, so it might be helpful to compare the results from these two approaches:</p>
+<pre class="r"><code>PLUM y WITH x
+  /CRITERIA=CIN(95) DELTA(0) LCONVERGE(0) MXITER(100) MXSTEP(5) PCONVERGE(1.0E-6) SINGULAR(1.0E-8)
+  /LINK=PROBIT
+  /PRINT=FIT KERNEL PARAMETER SUMMARY.
+
+Parameter Estimates
+|-----------------|--------|----------|-----------------------------------|
+|                 |Estimate|Std. Error|95% Confidence Interval            |
+|                 |        |          |-----------------------|-----------|
+|                 |        |          |Lower Bound            |Upper Bound|
+|---------|-------|--------|----------|-----------------------|-----------|
+|Threshold|[y = 1]|-.442   |.051      |-.541                  |-.343      |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 2]|.230    |.049      |.134                   |.326       |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 3]|.669    |.051      |.569                   |.769       |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 4]|1.198   |.056      |1.088                  |1.308      |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 5]|1.876   |.066      |1.747                  |2.005      |
+|---------|-------|--------|----------|-----------------------|-----------|
+|Location |x      |1.253   |.065      |1.125                  |1.381      |
+|-------------------------------------------------------------------------|
+Link function: Probit.</code></pre>
+<p>Unsurprisingly, the numerical results from brms (posterior means and standard deviations, credibility intervals) match the frequentist ones obtained from SPSS.</p>
+<p>We can now illustrate graphically how the estimated parameters map to the signal detection model. <em>d’</em> is the separation of the signal and noise distributions’ peaks: It indexes the subject’s ability to discriminate signal from noise trials. The five intercepts are the (z-scored) criteria for responding with the different confidence ratings. If we convert the z-scores to proportions (using R’s <code>pnorm()</code> for example), they measure the (cumulative) area under the noise distribution to the left of that z-score. The model is visualized in Figure <a href="#fig:fit1-plot">1</a>.</p>
+<div class="figure"><span id="fig:fit1-plot"></span>
+<img src="/post/2017-10-23-bayesian-estimation-of-signal-detection-theory-models-part-3_files/figure-html/fit1-plot-1.png" alt="The equal variance Gaussian signal detection model, visualized from the parameters' posterior means. The two distributions are the noise distribution (dashed) and the signal distribution (solid). Dotted vertical lines are response criteria. d' is the distance between the peaks of the two distributions." width="672" />
+<p class="caption">
+Figure 1: The equal variance Gaussian signal detection model, visualized from the parameters’ posterior means. The two distributions are the noise distribution (dashed) and the signal distribution (solid). Dotted vertical lines are response criteria. d’ is the distance between the peaks of the two distributions.
+</p>
+</div>
+</div>
+<div id="uvsdt-one-subjects-rating-responses" class="section level1">
+<h1>UVSDT: one subject’s rating responses</h1>
+<p>Notice that the above model assumed that the noise and signal distributions have the same variance. The unequal variances SDT (UVSDT) model allows the signal distribution to have a different variance than the noise distribution (whose standard deviation is still arbitrarily fixed at 1). It has been found that when the signal distribution’s standard deviation is allowed to vary, it is consistently greater than 1.</p>
+<p>The UVSDT model adds one parameter to the model, and we can write out the resulting model by including the signal distribution’s standard deviation as a scale parameter in the above equation <span class="citation">(Decarlo 2003)</span>. However, because the standard deviation parameter must be greater than zero, it is convenient to model <span class="math inline">\(\mbox{log}(\sigma_{old}) = a\)</span> instead:</p>
+<p><span class="math display">\[p(y_i \leq k_i) = \Phi(\frac{d&#39;\mbox{isold}_i - c_k}{\mbox{exp}(a\mbox{isold}_i)})\]</span></p>
+<p>It turns out that this nonlinear model—also knows as a probit model with heteroscedastic error (e.g. <span class="citation">DeCarlo (2010)</span>)—can be estimated with brms. Initially, I thought that we could write out a nonlinear brms formula for the ordinal probit model, but brms does not support nonlinear cumulative ordinal models. I then proceeded to modify the raw Stan code to estimate this model, but although that worked, it would be less practical for applied work because not everyone wants to go through the trouble of writing Stan code.</p>
+<p>After some back and forth with the creator of brms—Paul Bürkner, who deserves a gold medal for his continuing hard work on this free and open-source software—I found out that brms by default includes a similar parameter in ordinal regression models. If you scroll back up and look at the summary of <code>fit1</code>, at the top you will see that the model’s formula is:</p>
+<pre><code>Formula: y ~ isold 
+         disc = 1</code></pre>
+<p>In other words, there is a “discrimination” parameter <code>disc</code>, which is set to 1 by default. Here’s how brms parameterizes the ordinal probit model:</p>
+<p><span class="math display">\[p(y_i \leq k_i) = \Phi(disc * (c_{ki} - d&#39;\mbox{isold}_i))\]</span></p>
+<p>Importantly, we can also include predictors on <code>disc</code>. In this case, we want to estimate <code>disc</code> when <code>isold</code> is 1, such that <code>disc</code> is 1 for new items, but estimated from data for old items. This parameter is by default modelled through a log link function, and including a 0/1 predictor (<code>isold</code>) will therefore work fine:</p>
+<p><span class="math display">\[p(y_i \leq k_i) = \Phi(\mbox{exp}(disc\mbox{isold}_i) * (c_{ki} - d&#39;\mbox{isold}_i))\]</span></p>
+<p>We can therefore estimate this model with only a small tweak to the EVSDT model’s code:</p>
+<pre class="r"><code>uvsdt_m &lt;- bf(y ~ isold, disc ~ 0 + isold)</code></pre>
+<p>There are two brms formulas in the model. The first, <code>y ~ isold</code> is already familiar to us. In the second formula, we write <code>disc ~ 0 + isold</code> to prevent the parameter from being estimated for the noise distribution: Recall that we have set the standard deviation of the noise distribution to be one (achieved by <span class="math inline">\(exp(disc * \mbox{0}) = 1\)</span>. In R’s (and by extension, brms’) modeling syntax <code>0 + ...</code> means removing the intercept from the model. By including <code>isold</code> only, we achieve the 0/1 predictor as described above. We can then estimate the model:</p>
+<pre class="r"><code>fit2 &lt;- brm(uvsdt_m, 
+            family = cumulative(link=&quot;probit&quot;), 
+            data = d,
+            control = list(adapt_delta = .99),
+            cores = 4,
+            file = here::here(&quot;static/data/sdtmodel3-2&quot;))</code></pre>
+<p>The model’s estimated parameters:</p>
+<pre class="r"><code>summary(fit2)</code></pre>
+<pre><code>##  Family: cumulative 
+##   Links: mu = probit; disc = log 
+## Formula: y ~ isold 
+##          disc ~ 0 + isold
+##    Data: d (Number of observations: 1188) 
+## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup samples = 4000
+## 
+## Population-Level Effects: 
+##              Estimate Est.Error l-95% CI u-95% CI Eff.Sample Rhat
+## Intercept[1]    -0.54      0.05    -0.64    -0.43       3420 1.00
+## Intercept[2]     0.20      0.05     0.11     0.30       5291 1.00
+## Intercept[3]     0.71      0.05     0.61     0.82       4472 1.00
+## Intercept[4]     1.37      0.07     1.25     1.51       2203 1.00
+## Intercept[5]     2.31      0.11     2.10     2.54       1562 1.00
+## isold            1.53      0.10     1.35     1.72       1724 1.00
+## disc_isold      -0.36      0.06    -0.48    -0.24       1501 1.00
+## 
+## Samples were drawn using sampling(NUTS). For each parameter, Eff.Sample 
+## is a crude measure of effective sample size, and Rhat is the potential 
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>Notice that we need to flip the sign of the <code>disc</code> parameter to get <span class="math inline">\(\mbox{log}(\sigma_{old})\)</span>. Exponentiation gives us the standard deviation of the signal distribution, and because we estimated the model in the Bayesian framework, our estimate of this parameter is a posterior distribution, plotted on the y-axis of Figure <a href="#fig:uvsdt-densityplot">2</a>.</p>
+<div class="figure"><span id="fig:uvsdt-densityplot"></span>
+<img src="/post/2017-10-23-bayesian-estimation-of-signal-detection-theory-models-part-3_files/figure-html/uvsdt-densityplot-1.png" alt="The (approximate) joint posterior density of two UVSDT parameters (d' and standard deviation of the signal distribution) fitted to one participant's data. Lighter yellow colors indicate higher posterior density. Red point shows the maximum likelihood estimates obtained from SPSS's ordinal regression module." width="672" />
+<p class="caption">
+Figure 2: The (approximate) joint posterior density of two UVSDT parameters (d’ and standard deviation of the signal distribution) fitted to one participant’s data. Lighter yellow colors indicate higher posterior density. Red point shows the maximum likelihood estimates obtained from SPSS’s ordinal regression module.
+</p>
+</div>
+<p>We can also compare the results from brms’ to ones obtained from SPSS (SPSS procedure described in <span class="citation">(Decarlo 2003)</span>):</p>
+<pre class="r"><code>PLUM y WITH x
+  /CRITERIA=CIN(95) DELTA(0) LCONVERGE(0) MXITER(100) MXSTEP(5) PCONVERGE(1.0E-6) SINGULAR(1.0E-8)
+  /LINK=PROBIT
+  /PRINT=FIT KERNEL PARAMETER SUMMARY
+  /SCALE=x .
+
+Parameter Estimates
+|-----------------|--------|----------|-----------------------------------|
+|                 |Estimate|Std. Error|95% Confidence Interval            |
+|                 |        |          |-----------------------|-----------|
+|                 |        |          |Lower Bound            |Upper Bound|
+|---------|-------|--------|----------|-----------------------|-----------|
+|Threshold|[y = 1]|-.533   |.054      |-.638                  |-.428      |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 2]|.204    |.050      |.107                   |.301       |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 3]|.710    |.053      |.607                   |.813       |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 4]|1.366   |.067      |1.235                  |1.498      |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 5]|2.294   |.113      |2.072                  |2.516      |
+|---------|-------|--------|----------|-----------------------|-----------|
+|Location |x      |1.519   |.096      |1.331                  |1.707      |
+|---------|-------|--------|----------|-----------------------|-----------|
+|Scale    |x      |.348    |.063      |.225                   |.472       |
+|-------------------------------------------------------------------------|
+Link function: Probit.</code></pre>
+<p>Again, the maximum likelihood estimates (SPSS) match our Bayesian quantities numerically, because we used uninformative prior distributions. Plotting the model’s implied distributions illustrates that the signal distribution has greater variance than the noise distribution (Figure <a href="#fig:fit2-plot">3</a>).</p>
+<div class="figure"><span id="fig:fit2-plot"></span>
+<img src="/post/2017-10-23-bayesian-estimation-of-signal-detection-theory-models-part-3_files/figure-html/fit2-plot-1.png" alt="The unequal variance Gaussian signal detection model, visualized from the parameters' posterior means. The two distributions are the noise distribution (dashed) and the signal distribution (solid). Dotted vertical lines are response criteria. d' is the scaled distance between the peaks of the two distributions." width="672" />
+<p class="caption">
+Figure 3: The unequal variance Gaussian signal detection model, visualized from the parameters’ posterior means. The two distributions are the noise distribution (dashed) and the signal distribution (solid). Dotted vertical lines are response criteria. d’ is the scaled distance between the peaks of the two distributions.
+</p>
+</div>
+<p>Additional quantities of interest can be calculated from the parameters’ posterior distributions. One benefit of obtaining samples from the posterior is that if we complete these calculations row-wise, we automatically obtain (samples from) the posterior distributions of these additional quantities.</p>
+<p>Here, we calculate one such quantity: The ratio of the noise to signal standard deviations (<span class="math inline">\(\mbox{exp}(-a)\)</span>; notice that our model returns <em>-a</em> as <em>disc_isold</em>), which is also the slope of the z-ROC curve. We’ll first obtain the posterior samples of <em>disc_isold</em>, then calculate the ratio, and summarize the samples from ratio’s posterior distribution with their 2.5%, 50%, and 97.5%iles:</p>
+<pre class="r"><code>as.data.frame(fit2, pars = &quot;b_disc_isold&quot;) %&gt;% 
+    transmute(ratio = exp(b_disc_isold)) %&gt;%
+    pull(ratio) %&gt;% 
+    quantile(probs = c(.025, .5, .975))</code></pre>
+<pre><code>##  2.5%   50% 97.5% 
+## 0.618 0.699 0.788</code></pre>
+<p>These summaries are the parameter’s 95% Credible interval and median, and as such can be used to summarize this quantity in a publication. We could also visualize the posterior draws as a histogram:</p>
+<pre class="r"><code>as.data.frame(fit2, pars = &quot;b_disc_isold&quot;) %&gt;% 
+    transmute(ratio = exp(b_disc_isold)) %&gt;%
+    ggplot(aes(ratio)) +
+    geom_histogram(col=&quot;black&quot;, fill=&quot;gray70&quot;) +
+    theme(aspect.ratio = 1)</code></pre>
+<p><img src="/post/2017-10-23-bayesian-estimation-of-signal-detection-theory-models-part-3_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>Thanks for reading.</p>
+</div>
+<div id="references" class="section level1 unnumbered">
+<h1>References</h1>
+<div id="refs" class="references">
+<div id="ref-burkner_brms:_2017">
+<p>Bürkner, Paul-Christian. 2017. “Brms: An R Package for Bayesian Multilevel Models Using Stan.” <em>Journal of Statistical Software</em> 80 (1): 1–28. <a href="https://doi.org/10.18637/jss.v080.i01">https://doi.org/10.18637/jss.v080.i01</a>.</p>
+</div>
+<div id="ref-decarlo_using_2003">
+<p>Decarlo, Lawrence T. 2003. “Using the PLUM Procedure of SPSS to Fit Unequal Variance and Generalized Signal Detection Models.” <em>Behavior Research Methods, Instruments, &amp; Computers</em> 35 (1): 49–56. <a href="https://doi.org/10.3758/BF03195496">https://doi.org/10.3758/BF03195496</a>.</p>
+</div>
+<div id="ref-decarlo_statistical_2010">
+<p>DeCarlo, Lawrence T. 2010. “On the Statistical and Theoretical Basis of Signal Detection Theory and Extensions: Unequal Variance, Random Coefficient, and Mixture Models.” <em>Journal of Mathematical Psychology</em> 54 (3): 304–13. <a href="https://doi.org/10.1016/j.jmp.2010.01.001">https://doi.org/10.1016/j.jmp.2010.01.001</a>.</p>
+</div>
+<div id="ref-r_core_team_r:_2017">
+<p>R Core Team. 2017. <em>R: A Language and Environment for Statistical Computing</em>. Vienna, Austria: R Foundation for Statistical Computing. <a href="https://www.R-project.org/">https://www.R-project.org/</a>.</p>
+</div>
+<div id="ref-stan_development_team_stan:_2016">
+<p>Stan Development Team. 2016. <em>Stan: A C++ Library for Probability and Sampling, Version 2.15.0</em>. <a href="http://mc-stan.org/">http://mc-stan.org/</a>.</p>
+</div>
+</div>
+</div>

@@ -1,0 +1,21 @@
+---
+title: "Some Short Notes on Statistics"
+author: "Matti Vuorre"
+date: 2015-01-28
+categories: ["statistics"]
+tags: ["NHST"]
+---
+
+Gerd Gigerenzer writes ([in a paper 10 years ago](http://library.mpib-berlin.mpg.de/ft/gg/GG_Mindless_2004.pdf)):
+
+>"Most researchers, [a prominent textbook author] argued, are not really interested in statistical thinking, but only in how to get their papers published."
+
+The article offers an idiosyncratic, interesting and to my mind an agreeable yet discomforting view of the historical development of the NHSTP--Null Hypothesis Significance Testing Procedure--and its perils.
+
+It's full of interesting historical trivia, such as R.D. Luce's comment on NHSTP:
+
+>"[The NHSTP ritual represents] mindless hypothesis testing in lieu of doing good research: measuring effects, constructing substantive theories of some depth, and developing probability models and statistical procedures suited to these theories"
+
+# Progress?
+
+But that was 10 years ago. Now that research integrity is in the spotlight, things are much better. We all care about things like [uncertainty](http://riddlet.github.io/Lab-Meeting/) and sampling variance. Scientists pursue the Truth relentlessly, ignoring trivialities like personal hygiene and careers; journalists convey accurate summaries of recent findings; and so forth.

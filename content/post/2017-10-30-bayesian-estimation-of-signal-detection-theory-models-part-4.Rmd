@@ -1,0 +1,215 @@
+---
+title: Bayesian Estimation of Signal Detection Models, Part 4
+author: Matti Vuorre
+date: '2017-10-30'
+slug: bayesian-estimation-of-signal-detection-theory-models-part-4
+categories:
+  - psychology
+  - statistics
+tags:
+  - bayes
+  - brms
+  - modeling
+  - psychology
+  - R
+  - statistics
+  - tutorial
+draft: no
+output:
+  blogdown::html_page:
+    toc: yes
+    number_sections: no
+    toc_depth: 2
+    df_print: paged
+summary: (This post is part 4 of a series of blog posts discussing Bayesian estimation of Signal Detection models.) In this blog post, I describe how to estimate the unequal variances Gaussian signal detection (UVSDT) model for confidence rating responses, for multiple participants simultaneously. I provide software code for the hierarchical Bayesian model in R.
+bibliography: "`r here::here('static/bibliography/blog.bib')`"
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(knitr)
+library(bayesplot)
+library(ggridges)
+library(gridExtra)
+library(brms)
+options(digits = 3)
+opts_chunk$set(warning = F, message = F, eval = T, cache = T)
+theme_set(theme_linedraw())
+```
+
+This post is the fourth part in a series of blog posts on Signal Detection models [@macmillan_detection_2005; @mcnicol_primer_2005]. In the first part, I described how to estimate the equal variance Gaussian SDT (EVSDT) model for a single participant, using Bayesian (generalized linear and nonlinear) modeling techniques. In the second part, I described how to estimate the equal variance Gaussian SDT model for multiple participants simultaneously, using hierarchical Bayesian models. In the third post, I showed how to esimate equal- and unequal variances SDT models for confidence rating data for a single participant.
+
+However, we almost always want to discuss our inference about the population, not individual subjects. Further, if we wish to discuss individual subjects, we should place them in the context of other subjects. A multilevel (aka hierarchical, mixed) model accomplishes these goals by including population- and subject-level parameters. 
+
+I will again describe the software implementation in R using the brms package [@burkner_brms:_2017; @r_core_team_r:_2017]. This blog post will be shorter than the previous installments; I assume you're familiar with the material covered in those posts.
+
+# Hierarchical UVSDT model
+
+## Example data set
+
+We'll use a data set of 48 subjects' confidence ratings on a 6 point scale: 1 = "sure new", ..., 6 = "sure old" [@koen_examining_2013]. This data set is included in the R package MPTinR [@singmann_mptinr:_2013].
+
+In this experiment [@koen_examining_2013], participants completed a study phase, and were then tested under full attention, or while doing a second task. Here, we focus on the rating data provided in the full attention condition. Below, I reproduce the aggregate rating counts for old and new items from the Table in the article's appendix. (It is useful to ensure that we are indeed using the same data.)
+
+```{r, echo = F}
+# Get some data!
+library(tidyverse)
+data("roc6", package = "MPTinR")
+
+# Koen 2013 exp 2 full attention
+d <- roc6 %>% 
+  as_tibble() %>% 
+  filter(exp == "Koen-2013_full") %>% 
+  select(-exp) %>% 
+  separate(id, c("id", "exp"), sep=":") %>% 
+  select(-exp) %>% 
+  gather(key, count, -id) %>% 
+  separate(key, into = c("isold", "response")) %>% 
+  mutate(isold = ifelse(isold=="OLD", 1, 0)) %>% 
+  mutate(y = as.integer(substr(response, 1, 1)),
+         yy = substr(response, 2, 4),
+         yy = ifelse(yy=="old", 1, -1),
+         y = y*yy,
+         y = ifelse(y < 0, y+4, y+3)) %>% 
+  select(-yy) %>% 
+  mutate(id = as.integer(id))
+d <- d[rep(seq_len(nrow(d)), d$count), c("id", "isold", "y")]
+d <- arrange(d, isold, y)
+
+# Aggregate counts match reported in paper
+group_by(d, isold) %>% 
+    count(y) %>% 
+    ungroup() %>% 
+    mutate(isold = factor(isold, levels=c(1,0), labels = c("old", "new")),
+           y = factor(y, levels=rev(1:6))) %>% 
+    spread(y, n)
+```
+
+For complete R code, including pre-processing the data, please refer to the [source code](https://github.com/mvuorre/blog) of this blog post. I have omitted some of the less important code from the blog post for clarity.
+
+## Model syntax
+
+Here's the brms syntax we used for estimating the model for a single participant:
+
+```{r, eval=F, echo=T}
+uvsdt_m <- bf(y ~ isold, disc ~ 0 + isold)
+```
+
+With the above syntax we specifed seven parameters: Five intercepts (aka 'thresholds' in the cumulative probit model) on `y`[^intercept]; the effect of `isold` on `y`; and the effect of `isold` on the discrimination parameter `disc`[^omit-intercept]. There are five intercepts (thresholds), because there are six response categories.
+
+[^intercept]: Recall that intercepts are automatically included, but can be explicitly included by adding `1` to the formula's right hand side.
+[^omit-intercept]: `0 + ...` removes the model's intercept.
+
+We extend the code to a hierarchical model by specifying that all these parameters vary across participants (variable `id` in the data).
+
+```{r}
+uvsdt_h <- bf(y ~ isold + (isold |s| id), 
+              disc ~ 0 + isold + (0 + isold |s| id))
+```
+
+Recall from earlier posts that using `|s|` leads to estimating correlations among the varying effects. There will only be one standard deviation associated with the thresholds; that is, the model assumes that subjects vary around the mean threshold similarly for all thresholds.
+
+## Prior distributions
+
+I set a N(1, 3) prior on dprime, just because I know that in these tasks performance is usually pretty good. Perhaps this prior is also influenced by my reading of the paper! I also set a N(0, 1) prior on *a*: Usually this parameter is found to be around $-\frac{1}{4}$, but I'm ignoring that information.
+
+The *t(7, 0, .33)* priors on the between-subject standard deviations reflect my assumption that the subjects should be moderately similar to one another, but also allows larger deviations. (They are *t*-distributions with seven degrees of freedom, zero mean, and .33 standard deviation.)
+
+```{r}
+Prior <- c(prior(normal(1, 3), class = "b", coef = "isold"),
+           prior(normal(0, 1), class = "b", coef = "isold", dpar = "disc"),
+           prior(student_t(7, 0, .33), class = "sd"),
+           prior(student_t(7, 0, .33), class = "sd", dpar = "disc"),
+           prior(lkj(2), class = "cor"))
+```
+
+## Estimate and summarise parameters
+
+We can then estimate the model as before. Be aware that this model takes quite a bit longer to estimate (note that I have reduced the iterations to 500 from the default 2000).
+
+```{r fit}
+fit <- brm(uvsdt_h,
+           family = cumulative(link="probit"),
+           data = d,
+           prior = Prior,
+           control = list(adapt_delta = .9), inits = 0,
+           cores = 4, iter = 500,
+           file = here::here("static/data/sdtmodel4-1"))
+```
+
+We then display numerical summaries of the model's parameters. Note that the effective sample sizes are modest, and Rhats indicate that we would benefit from drawing more samples from the posterior. For real applications, I recommend more than 500 iterations per chain.
+
+```{r}
+summary(fit)
+```
+
+Let's first focus on the "Population-level Effects": The effects for the "average person". `isold` is *d'*, and is very close to the one reported in the paper (eyeballing Figure 3 in @koen_examining_2013; this *d'* is not numerically reported in the paper). `disc_isold` is, because of the model's parameterization, $-\mbox{log}(\sigma_{signal}) = -a$. The paper discusses $V_o = \sigma_{signal}$, and therefore we transform each posterior sample of our *-a* to obtain samples from $V_o$'s posterior distribution.
+
+```{r}
+samples <- posterior_samples(fit, "b_") %>% 
+    mutate(Vo = exp(-b_disc_isold))
+```
+
+We can then plot density curves [@gabry_bayesplot:_2017] for each of the Population-level Effects in our model, including $V_o$. Figure \@ref(fig:population-density) shows that our estimate of $V_o$ corresponds very closely to the one reported in the paper (Figure 3 in @koen_examining_2013).
+
+```{r population-density, fig.cap = "Density plots of UVSDT model's Population-level Effects' posterior distributions. Different parameters are indicated on the y-axis, and possible values on the x-axis. Vertical lines are posterior means, and shaded areas are 80\\% credible intervals."}
+library(bayesplot)
+mcmc_areas(samples, point_est = "mean", prob = .8)
+```
+
+### Heterogeneity parameters
+
+Although the "population-level estimates", which perhaps should be called "average effects", are usually the main target of inference, they are not the whole story, nor are they necessarily the most interesting part of it. It has been firmly established that, when allowed to vary, the standard deviation of the noise distribution is greater than 1. However, the between-subject variability of this parameter has received less interest. Figure \@ref(fig:population-density2) reveals that the between-subject heterogeneity of *a* is quite large: The subject-specific effects have a standard deviation around .5. 
+
+```{r population-density2, fig.cap="Density plots of the standard deviation and correlation parameters of the UVSDT model's parameters. Parameter's appended with 'sd_id__' are between-id standard deviations, ones with 'cor_id__' are between-id correlations."}
+samples_h <- posterior_samples(fit, c("sd_", "cor_"))
+mcmc_areas(samples_h, point_est = "mean", prob = .8)
+```
+
+Figure \@ref(fig:population-density2) also tells us that the subject-specific *d'*s and *a*s are correlated ("cor_id__isold__disc_isold"). We can further investigate this relationship by plotting the subject specific signal-SDs and *d'*s side by side:
+
+```{r side-by-side, echo = F, fig.cap="Ridgeline plot of posterior distributions of subject-specific standard deviations (left) and d-primes (right). The ordering of subjects on the y-axis is the same, so as to highlight the relationship between the two variables."}
+p1d <- coef(fit, summary=F)$id[,,"disc_isold"] %>% 
+    as_tibble() %>% 
+    mutate_all(funs(exp(-.))) %>% 
+    gather() %>% 
+    mutate(ID = reorder(key, value, sd))
+p1 <- p1d %>% 
+    ggplot(aes(value, ID)) +
+    geom_density_ridges(rel_min_height=0.001) +
+    scale_x_continuous(bquote(sigma[signal]), 
+                       breaks = scales::pretty_breaks())
+p2 <- coef(fit, summary=F)$id[,,"isold"] %>% 
+    as_tibble() %>% 
+    gather() %>% 
+    mutate(ID = factor(key, levels = levels(p1d$ID))) %>% 
+    ggplot(aes(value, ID)) +
+    geom_density_ridges(rel_min_height=0.001) +
+    scale_x_continuous("d'", breaks = scales::pretty_breaks()) +
+    theme(axis.title.y = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank())
+grid.arrange(nrow=1, p1, p2)
+```
+
+As can be seen in the ridgeline plots [@wilke_ggridges:_2017] in Figure \@ref(fig:side-by-side), participants with greater $\sigma_{signal}$ tend to have greater d': Increase in recognition sensitivity is accompanied with an increase in the signal distribution's variability. The density plots also make it clear that we are much less certain about individuals whose values (either one) are greater, as shown by the spread out posterior distributions. Yet another way to visualize this relationship is with a scatterplot of the posterior means Figure \@ref(fig:scatterplot).
+
+```{r scatterplot, echo = F, fig.cap="Scatterplot of posterior means of subject-specific d-primes and signal distribution standard deviations."}
+discs <- as.data.frame(coef(fit)$id[,,"disc_isold"]) %>% 
+    rownames_to_column() %>% 
+    mutate(Estimate = exp(-Estimate))
+dprimes <- as.data.frame(coef(fit)$id[,,"isold"]) %>% 
+    rownames_to_column()
+inner_join(discs, dprimes, by="rowname") %>% 
+    ggplot(aes(Estimate.x, Estimate.y)) +
+    geom_point(shape=1) +
+    labs(x=bquote(sigma[signal]), y="d'")
+```
+
+# Conclusion
+
+Estimating EVSDT and UVSDT models in the Bayesian framework with the brms package [@burkner_brms:_2017] is both easy (relatively speaking) and informative. In this post, we estimated a hierarchical nonlinear cognitive model using no more than a few lines of code. Previous literature on the topic (e.g. @rouder_signal_2007) has focused on simpler (EVSDT) models with more complicated implementations--hopefully in this post I have shown that these models are within the reach of a greater audience, provided that they have some familiarity with R.
+
+Another point worth making is a more general one about hierarchical models: We know that participants introduce (random) variation in our models. Ignoring this variation is clearly not good [@estes_problem_1956]. It is more appropriate to model this variability, and use the resulting parameters to draw inference about the heterogeneity in parameters (and more generally, cognitive strategies) across individuals. Although maximum likelihood methods provide (noisy) point estimates of what I've here called between-subject heterogeneity parameters, the Bayesian method allows drawing firm conclusions about these parameters.
+
+# References

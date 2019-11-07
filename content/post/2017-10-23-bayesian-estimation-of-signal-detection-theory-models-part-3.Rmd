@@ -1,0 +1,288 @@
+---
+title: Bayesian Estimation of Signal Detection Models, Part 3
+author: Matti Vuorre
+date: '2017-10-16'
+slug: bayesian-estimation-of-signal-detection-theory-models-part-3
+categories:
+  - psychology
+  - statistics
+tags:
+  - bayes
+  - brms
+  - modeling
+  - psychology
+  - R
+  - statistics
+  - tutorial
+draft: no
+output:
+  blogdown::html_page:
+    toc: yes
+    number_sections: no
+    toc_depth: 2
+summary: (This post is part 3 in a series of blog posts discussing Bayesian estimation of Signal Detection models.) In this post, we extend the EVSDT model to confidence rating responses, and estimate the resulting model as an ordinal probit regression. I also describe how to estimate the unequal variance Gaussian SDT model for a single participant. I provide a software implementation in R.
+bibliography: "`r here::here('static/bibliography/blog.bib')`"
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(knitr)
+library(brms)
+options(digits = 3)
+opts_chunk$set(warning = F, message = F, cache = T)
+theme_set(theme_linedraw())
+```
+
+This post is the third part in a series of blog posts on Signal Detection models: In the first part, I described how to estimate the equal variance Gaussian SDT (EVSDT) model for a single participant, using Bayesian (generalized linear and nonlinear) modeling techniques. In the second part, I described how to estimate the equal variance Gaussian SDT model for multiple participants simultaneously, using hierarchical Bayesian models. 
+
+In this blog post, I extend the discussion to rating tasks and then show how to estimate equal- and unequal variance Gaussian SDT (UVSDT) models with Bayesian methods, using R and the brms package [@burkner_brms:_2017; @r_core_team_r:_2017]. Here, we focus on estimating the model for a single participant. In the next blog post, we discuss hierarchical models for multiple participants.
+
+# Introduction
+
+## Example data: Rating task
+
+We begin with a brief discussion of the rating task, with example data from @decarlo_using_2003. In previous posts, we discussed signal detection experiments where the item was either old or new, and participants provided binary "old!" or "new!" responses. Here, we move to a slight modification of this task, where participants are allowed to express their certainty: On each trial, the presented item is still old or new, but participants now *rate their confidence* in whether the item was old or new. For example, and in the data below, participants can answer with numbers indicating their confidence that the item is old: 1 = Definitely new, ..., 6 = Definitely old.
+
+One interpretation of the resulting data is that participants set a number of criteria for the confidence ratings, such that greater evidence is required for 6-responses, than 4-responses, for example. That is, there will be different criteria for responding "definitely new", "maybe new", and so forth. However, the participant's underlying discriminability should remain unaffected.
+
+The example data is shown in a summarised form below (counts of responses for each confidence bin, for both old (`isold` = 1) and new trial types [@decarlo_using_2003]): 
+
+```{r}
+library(tidyverse)
+dsum <- tibble(
+    isold = c(0,0,0,0,0,0,1,1,1,1,1,1),
+    y = c(1:6, 1:6),
+    count = c(174, 172, 104, 92, 41, 8, 46, 57, 66, 101, 154, 173)
+)
+dsum
+```
+
+However, one overarching theme of these blog posts is the idea that we don't need to summarise data to counts (or cell means, or the like), but can and perhaps should instead work with raw responses, as provided by the experimental program. Working with such trial-level data is, I think, computationally and conceptually easier, especially when we wish to include covariates. Here is the data in the raw trial-level format:
+
+```{r}
+d <- tibble(
+    isold = c(rep(0, 174), rep(0, 172), rep(0, 104), rep(0, 92), rep(0, 41), rep(0, 8),
+          rep(1, 46), rep(1, 57), rep(1, 66), rep(1, 101), rep(1, 154), rep(1, 173)),
+    y = c(rep(1, 174), rep(2, 172), rep(3, 104), rep(4, 92), rep(5, 41), rep(6, 8),
+          rep(1, 46), rep(2, 57), rep(3, 66), rep(4, 101), rep(5, 154), rep(6, 173))
+)
+d
+```
+
+(The code above is pretty ugly. If anybody knows of a tidy way of getting from the summarised data to a trial-level representation, please let me know.) If you want to follow along on your own computer, you can execute the above lines in R.
+
+We can now proceed to fit the SDT models to this person's data, beginning with the EVSDT model.
+
+# EVSDT: one subject's rating responses
+
+Recall that for the EVSDT model of binary responses, we modeled the probability *p* (of responding "old!" on trial *i*) as
+
+$$p_i = \Phi(d'\mbox{isold}_i - c)$$
+
+This model gives the (z-scored) probability of responding "old" for new items (*c* = zFAR), and the increase (in z-scores) in "old" responses for old items (*d'*). For rating data, the model is similar but we now include multiple *c*s. These index the different criteria for responding with the different confidence ratings. The criteria are assumed to be ordered--people should be more lenient to say unsure old, vs. sure old, when the signal (memory strength) on that trial was weaker.
+
+The EVSDT model for rating responses models the *cumulative probability* of responding with confidence rating *k* or less ($p(y_i \leq k_i)$; @decarlo_using_2003):
+
+$$p(y_i \leq k_i) = \Phi(d'\mbox{isold}_i - c_{ki})$$
+
+This model is also known as an ordinal probit ($\Phi$) model, and can be fit with widely available regression modeling software. [@decarlo_using_2003] showed how to use the PLUM procedure in SPSS to fit it for a single participant. However, we can obtain Bayesian inference for this model by estimating the model with the brms package in R [@burkner_brms:_2017; @stan_development_team_stan:_2016]. Ignoring prior distributions for now, the brms syntax for estimating this model with the above data is:
+
+```{r fit1, cache = T}
+fit1 <- brm(y ~ isold, 
+            family = cumulative(link="probit"), 
+            data = d,
+            cores = 4,
+            file = here::here("static/data/sdtmodel3-1"))
+```
+
+This model estimates an intercept (criterion) for each response category, and the effect of `isold`, which is *d'*. The model's posterior distribution is summarised below:
+
+```{r}
+summary(fit1)
+```
+
+The five intercepts are the five criteria in the model, and `isold` is *d'*. I also estimated this model using SPSS, so it might be helpful to compare the results from these two approaches: 
+
+```{r, eval=F, results='asis'}
+PLUM y WITH x
+  /CRITERIA=CIN(95) DELTA(0) LCONVERGE(0) MXITER(100) MXSTEP(5) PCONVERGE(1.0E-6) SINGULAR(1.0E-8)
+  /LINK=PROBIT
+  /PRINT=FIT KERNEL PARAMETER SUMMARY.
+
+Parameter Estimates
+|-----------------|--------|----------|-----------------------------------|
+|                 |Estimate|Std. Error|95% Confidence Interval            |
+|                 |        |          |-----------------------|-----------|
+|                 |        |          |Lower Bound            |Upper Bound|
+|---------|-------|--------|----------|-----------------------|-----------|
+|Threshold|[y = 1]|-.442   |.051      |-.541                  |-.343      |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 2]|.230    |.049      |.134                   |.326       |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 3]|.669    |.051      |.569                   |.769       |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 4]|1.198   |.056      |1.088                  |1.308      |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 5]|1.876   |.066      |1.747                  |2.005      |
+|---------|-------|--------|----------|-----------------------|-----------|
+|Location |x      |1.253   |.065      |1.125                  |1.381      |
+|-------------------------------------------------------------------------|
+Link function: Probit.
+```
+
+Unsurprisingly, the numerical results from brms (posterior means and standard deviations, credibility intervals) match the frequentist ones obtained from SPSS. 
+
+We can now illustrate graphically how the estimated parameters map to the signal detection model. *d'* is the separation of the signal and noise distributions' peaks: It indexes the subject's ability to discriminate signal from noise trials. The five intercepts are the (z-scored) criteria for responding with the different confidence ratings. If we convert the z-scores to proportions (using R's `pnorm()` for example), they measure the (cumulative) area under the noise distribution to the left of that z-score. The model is visualized in Figure \@ref(fig:fit1-plot).
+
+```{r fit1-plot, echo = F, fig.cap = "The equal variance Gaussian signal detection model, visualized from the parameters' posterior means. The two distributions are the noise distribution (dashed) and the signal distribution (solid). Dotted vertical lines are response criteria. d' is the distance between the peaks of the two distributions."}
+# Basic plot
+p1 <- ggplot(data.frame(x = seq(-5, 6, by = .05)), aes(x=x)) +
+    coord_cartesian(ylim = c(0, 0.5), xlim = c(-3.5, 4), expand = 0) +
+    labs(x = "Signal strength", y = "Probability")
+# Add noise & signal distributions, and criterion
+crits <- tibble(crit = round(fixef(fit1)[1:5,1], 2),
+                zcrit = round(pnorm(crit), 2))
+p1 + stat_function(fun=dnorm, geom = "line", lty = 2,
+                   args = list(mean=0, sd=1)) +
+    stat_function(fun=dnorm, geom = "line", 
+                  args = list(fixef(fit1)[6,1], sd=1)) +
+    geom_vline(xintercept = crits$crit, lty = 3) +
+    geom_label(data = crits, aes(x=crit, y = .02+seq(0,.1, length=5), label = zcrit), 
+               size = 3, hjust=1)
+```
+
+# UVSDT: one subject's rating responses
+
+Notice that the above model assumed that the noise and signal distributions have the same variance. The unequal variances SDT (UVSDT) model allows the signal distribution to have a different variance than the noise distribution (whose standard deviation is still arbitrarily fixed at 1). It has been found that when the signal distribution's standard deviation is allowed to vary, it is consistently greater than 1. 
+
+The UVSDT model adds one parameter to the model, and we can write out the resulting model by including the signal distribution's standard deviation as a scale parameter in the above equation [@decarlo_using_2003]. However, because the standard deviation parameter must be greater than zero, it is convenient to model $\mbox{log}(\sigma_{old}) = a$ instead:
+
+$$p(y_i \leq k_i) = \Phi(\frac{d'\mbox{isold}_i - c_k}{\mbox{exp}(a\mbox{isold}_i)})$$
+
+It turns out that this nonlinear model---also knows as a probit model with heteroscedastic error (e.g. @decarlo_statistical_2010)---can be estimated with brms. Initially, I thought that we could write out a nonlinear brms formula for the ordinal probit model, but brms does not support nonlinear cumulative ordinal models. I then proceeded to modify the raw Stan code to estimate this model, but although that worked, it would be less practical for applied work because not everyone wants to go through the trouble of writing Stan code.
+
+After some back and forth with the creator of brms---Paul Bürkner, who deserves a gold medal for his continuing hard work on this free and open-source software---I found out that brms by default includes a similar parameter in ordinal regression models. If you scroll back up and look at the summary of `fit1`, at the top you will see that the model's formula is:
+
+```
+Formula: y ~ isold 
+         disc = 1
+```
+
+In other words, there is a "discrimination" parameter `disc`, which is set to 1 by default. Here's how brms parameterizes the ordinal probit model:
+
+$$p(y_i \leq k_i) = \Phi(disc * (c_{ki} - d'\mbox{isold}_i))$$
+
+Importantly, we can also include predictors on `disc`. In this case, we want to estimate `disc` when `isold` is 1, such that `disc` is 1 for new items, but estimated from data for old items. This parameter is by default modelled through a log link function, and including a 0/1 predictor (`isold`) will therefore work fine:
+
+$$p(y_i \leq k_i) = \Phi(\mbox{exp}(disc\mbox{isold}_i) * (c_{ki} - d'\mbox{isold}_i))$$
+
+We can therefore estimate this model with only a small tweak to the EVSDT model's code:
+
+```{r}
+uvsdt_m <- bf(y ~ isold, disc ~ 0 + isold)
+```
+
+There are two brms formulas in the model. The first, `y ~ isold` is already familiar to us. In the second formula, we write `disc ~ 0 + isold` to prevent the parameter from being estimated for the noise distribution: Recall that we have set the standard deviation of the noise distribution to be one (achieved by $exp(disc * \mbox{0}) = 1$. In R's (and by extension, brms') modeling syntax `0 + ...` means removing the intercept from the model. By including `isold` only, we achieve the 0/1 predictor as described above. We can then estimate the model:
+
+```{r fit2, cache = T}
+fit2 <- brm(uvsdt_m, 
+            family = cumulative(link="probit"), 
+            data = d,
+            control = list(adapt_delta = .99),
+            cores = 4,
+            file = here::here("static/data/sdtmodel3-2"))
+```
+
+The model's estimated parameters:
+
+```{r}
+summary(fit2)
+```
+
+Notice that we need to flip the sign of the `disc` parameter to get $\mbox{log}(\sigma_{old})$. Exponentiation gives us the standard deviation of the signal distribution, and because we estimated the model in the Bayesian framework, our estimate of this parameter is a posterior distribution, plotted on the y-axis of Figure \@ref(fig:uvsdt-densityplot).
+
+```{r uvsdt-densityplot, echo = F, fig.cap = "The (approximate) joint posterior density of two UVSDT parameters (d' and standard deviation of the signal distribution) fitted to one participant's data. Lighter yellow colors indicate higher posterior density. Red point shows the maximum likelihood estimates obtained from SPSS's ordinal regression module."}
+library(viridis)
+p2 <- as.data.frame(fit2, pars = "isold") %>% 
+    ggplot(aes(b_isold, exp(-b_disc_isold))) +
+    scale_fill_viridis() +
+    stat_density_2d(aes(fill=..density..),
+                    geom = "raster", contour=F, show.legend = FALSE, n = 301) +
+    geom_point(aes(x=1.52, y=exp(.35)), col="red", size = 2) +
+    coord_cartesian(expand = 0) +
+    labs(x = "d'", y = "SD(signal) [= exp(-disc_isold)]") +
+    theme(aspect.ratio=1)
+p2 + labs(title = "UVSDT model's posterior distribution",
+          caption = "Model fitted to one subject's data")
+```
+
+We can also compare the results from brms' to ones obtained from SPSS (SPSS procedure described in [@decarlo_using_2003]):
+
+```{r, eval=F, results='asis'}
+PLUM y WITH x
+  /CRITERIA=CIN(95) DELTA(0) LCONVERGE(0) MXITER(100) MXSTEP(5) PCONVERGE(1.0E-6) SINGULAR(1.0E-8)
+  /LINK=PROBIT
+  /PRINT=FIT KERNEL PARAMETER SUMMARY
+  /SCALE=x .
+
+Parameter Estimates
+|-----------------|--------|----------|-----------------------------------|
+|                 |Estimate|Std. Error|95% Confidence Interval            |
+|                 |        |          |-----------------------|-----------|
+|                 |        |          |Lower Bound            |Upper Bound|
+|---------|-------|--------|----------|-----------------------|-----------|
+|Threshold|[y = 1]|-.533   |.054      |-.638                  |-.428      |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 2]|.204    |.050      |.107                   |.301       |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 3]|.710    |.053      |.607                   |.813       |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 4]|1.366   |.067      |1.235                  |1.498      |
+|         |-------|--------|----------|-----------------------|-----------|
+|         |[y = 5]|2.294   |.113      |2.072                  |2.516      |
+|---------|-------|--------|----------|-----------------------|-----------|
+|Location |x      |1.519   |.096      |1.331                  |1.707      |
+|---------|-------|--------|----------|-----------------------|-----------|
+|Scale    |x      |.348    |.063      |.225                   |.472       |
+|-------------------------------------------------------------------------|
+Link function: Probit.
+```
+
+Again, the maximum likelihood estimates (SPSS) match our Bayesian quantities numerically, because we used uninformative prior distributions. Plotting the model's implied distributions illustrates that the signal distribution has greater variance than the noise distribution (Figure \@ref(fig:fit2-plot)).
+
+```{r fit2-plot, echo = F, fig.cap = "The unequal variance Gaussian signal detection model, visualized from the parameters' posterior means. The two distributions are the noise distribution (dashed) and the signal distribution (solid). Dotted vertical lines are response criteria. d' is the scaled distance between the peaks of the two distributions."}
+crits <- tibble(crit = round(fixef(fit2)[1:5,1], 2),
+                zcrit = round(pnorm(crit), 2))
+p1 + stat_function(fun=dnorm, geom = "line", lty = 2,
+                   args = list(mean=0, sd=1)) +
+    stat_function(fun=dnorm, geom = "line", 
+                  args = list(fixef(fit2)[6,1], sd=exp(-fixef(fit2)[7,1]))) +
+    geom_vline(xintercept = crits$crit, lty = 3) +
+    geom_label(data = crits, aes(x=crit, y = .02+seq(0,.1, length=5), label = zcrit), 
+               size = 3, hjust=1)
+```
+
+Additional quantities of interest can be calculated from the parameters' posterior distributions. One benefit of obtaining samples from the posterior is that if we complete these calculations row-wise, we automatically obtain (samples from) the posterior distributions of these additional quantities.
+
+Here, we calculate one such quantity: The ratio of the noise to signal standard deviations ($\mbox{exp}(-a)$; notice that our model returns *-a* as *disc_isold*), which is also the slope of the z-ROC curve. We'll first obtain the posterior samples of *disc_isold*, then calculate the ratio, and summarize the samples from ratio's posterior distribution with their 2.5%, 50%, and 97.5%iles:
+
+```{r}
+as.data.frame(fit2, pars = "b_disc_isold") %>% 
+    transmute(ratio = exp(b_disc_isold)) %>%
+    pull(ratio) %>% 
+    quantile(probs = c(.025, .5, .975))
+```
+
+These summaries are the parameter's 95% Credible interval and median, and as such can be used to summarize this quantity in a publication. We could also visualize the posterior draws as a histogram:
+
+```{r, fig.height = 4}
+as.data.frame(fit2, pars = "b_disc_isold") %>% 
+    transmute(ratio = exp(b_disc_isold)) %>%
+    ggplot(aes(ratio)) +
+    geom_histogram(col="black", fill="gray70") +
+    theme(aspect.ratio = 1)
+```
+
+Thanks for reading. 
+
+# References

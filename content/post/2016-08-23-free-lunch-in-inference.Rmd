@@ -1,0 +1,108 @@
+---
+title: "Statistical inference: Prix fixe or à la carte?"
+author: "Matti Vuorre"
+date: 2016-08-23
+categories: ["statistics"]
+tags: ["bayes", "review"]
+description: "A comment on 'Is There a Free Lunch in Inference' (Rouder et al., 2016, Topics in Cognitive Science)"
+---
+
+```{r, echo=F, warning=FALSE, message=FALSE}
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+opts_chunk$set(
+  fig.retina = 2,
+  fig.align = 'center', 
+  comment = "#", 
+  warning = F, 
+  message = F, 
+  cache = T,
+  fig.width=9,
+  fig.height=6
+)
+```
+
+Experimental investigations commonly begin with a hypothesis, an expectation of what one might find: "We hypothesize that alcohol leads to slower reactions to events in a driving simulator." Data is then collected and analyzed to specifically address this hypothesis. Almost always, the support for or against the hypothesis is statistical, not intraocular (Krantz, 1999). However, the prevailing statistical paradigm---null hypothesis significance testing (NHST)---never tests the researcher's offered hypothesis, but instead the "null hypothesis": That there is no relationship between alcohol consumption and reaction time. NHST results in a *p*-value, and values of *p* less than .05 are taken to indicate indicate that the data are sufficiently surprising under the null hypothesis that we now must accept the alternative hypothesis. 
+
+The NHST practice has been examined with a critical eye for decades by many prominent authors (Cohen, 1994; Krantz, 1999; Gigerenzer, 2004), and has most recently been challenged by an uprising of a variety of Bayesian methods. The Bayesian uprising has been prominently championed by a Band of Bayesians[^1], who in a long string of important publications and software packages have made the Bayesian approach an appealing, understandable, and, perhaps most importantly, practical method for researchers (Morey, Hoekstra, Rouder, Lee, & Wagenmakers, 2015; Morey, Romeijn, & Rouder, 2016; Rouder, Morey, & Wagenmakers, 2016 Rouder, Speckman, Sun, Morey, & Iverson, 2009; Wagenmakers, 2007; Morey & Rouder, 2015; JASP Team, 2016). Here, I would like to provide a brief commentary on a recent article about hypothesis testing and Bayesian inference, and remind us about the variety of the (Bayesian) statistical menu.
+
+In a recent article of high statistical significance, "Is There a Free Lunch in Inference" (Rouder, Morey, Verhagen, Province, & Wagenmakers, 2016), the authors argue that valid hypothesis testing requires not just null, but also well specified hypotheses. Here, after paraphrasing Rouder et al.'s core argument, I would like to draw attention to some of the negative aspects of how the argument is presented. Briefly, it seems that by naming "inference", but actually almost exclusively discussing hypothesis testing, the authors might have inadvertently downplayed the variety of (Bayesian) approaches to inference, and therefore readers may get the picture that the Bayes factor is the one and only way to utilize Bayes' theorem in data analysis.
+
+# No Free Lunch in Inference
+
+|Menu item              |Price                                          |
+|:----------------------|:----------------------------------------------|
+|Grilled salmon         |$18.99                                         |
+|Statistical inference  |One (or more) well-defined probability distribution(s)  |
+|Target article         |[Free](http://pcl.missouri.edu/sites/default/files/freeLunch_0.pdf)   |
+|...                    |...                                            |
+
+The starting point for Rouder et al.'s argument is that the classical paradigm of statistical inference in Psychology---accepting alternative hypotheses when a p-value is less than .05---is a flawed and unprincipled method of stating evidence (p. 522). One main cause for this state of affairs is that this paradigm, which they call the __*p* < .05 rule__, assumes that there are *"free lunches"*. That is, *p* < .05 is used as if it can provide evidence against the null hypothesis without requiring an alternative hypothesis (what the researcher actually expects / believes / wants to test). Unfortunately, there are no free lunches:
+
+>We may have the intuition that our conclusions are more valid, more objective, and more persuasive if it is not tied to a particular alternative. This intuition, however, is wrong. We argue here that statistical evidence may be properly understood and quantified only with reference to detailed alternatives. (Rouder et al., 2016, p. 523)
+
+Rouder et al. then argue that psychologists ought to provide well-defined alternatives if they wish to test hypotheses, and that the hypothesis-testing should be performed by computing Bayes factors (BF). Indeed, Bayes factors are arguably superior to *p*-values: the BF provides an elegant method for comparing two or more specific hypotheses, if they can be represented as probability distributions. 
+
+<p><img src="https://pbs.twimg.com/media/B6RmJEaIgAAV_hj.jpg:large" title="center" alt="center"  width="260" style="display: block; margin: auto;" />Figure 1. A Bayesian. Would you buy lunch from him?</p>
+
+The authors then give a detailed explanation of Bayes' rule ("*The deep meaning of Bayes' rule is that evidence is prediction*", p. 531), and Bayes factors ("[...] ratios of predictive densities are called *Bayes factors*.", p. 532). The discussion is illuminating, and recommended reading for anyone not familiar with these (see also my favourite exposition in *The philosophy of Bayes factors and the quantification of statistical evidence*, Morey, Romeijn, & Rouder, 2016). Most importantly, the Bayes factor is a tool for comparing the predictions from two or more hypotheses (coded as probability distributions.) In summary, there are no free lunches in inference; the price of a hypothesis test is a specified alternative hypothesis, and Bayes factors are the best candidate method for testing specified hypotheses. I'm writing this commentary about the use of "inference" in the previous sentence.
+
+# Statistical lunch: Price is variable
+
+I worry that the argument relies on too restricted a view of statistical inference. The foregoing discussion (or rather, the one in the actual paper) in favor of the Bayes factor as a tool for hypothesis testing is brilliant, but the paper's titular mention of "Inference" seems to miss the mark. Statistical inference _may be done_ by testing hypotheses (go Bayes factor!), but does not _have to be_ done so. Throughout the article, hypothesis testing is loudly advocated while estimation is quietly swept under the rug (there is a brief discussion of the estimation vs. testing at the end of the article, however.)
+
+<p><img src="/img/2016/inference-table.png" title="center" alt="center" width="480" style="display: block; margin: auto;" />Figure 2. A table of "inferential stances" reproduced without permission from Kruschke & Liddell (2015; the original caption: "Two conceptual distinctions in the practice of data analysis. Rows show point-value hypothesis testing versus estimating magnitude with uncertainty. Columns show frequentist versus Bayesian methods".)</p>
+
+The authors briefly discuss Confidence Intervals as a cure to the flawed *p* < .05 rule, and conclude that CIs are hardly an improvement, and that most researchers use CIs to test hypotheses anyway, by looking at whether critical values are outside the interval. This description (p. 528) seems quite accurate, but fails to mention that if the goal of CIs is estimation with uncertainty, not hypothesis testing (Figure 2), inference is quite cheap indeed. However, we can and should do better, with Bayesian Credible Intervals (Morey, Hoekstra, Rouder, Lee, & Wagenmakers, 2015). But Credible Intervals are discounted as well:
+
+>Inference with credible intervals does not satisfy Bayes’ rule. (Rouder et al., 2016, p. 535 [referring to Kruschke's ROPE method, Kruschke, 2011; Kruschke, 2014])
+
+However, because estimation is not inherently about hypothesis testing, it is unfair to claim that inferencing (that's a word now) via estimation is inadequate or unsatisfying because it doesn't satisfy the rules of hypothesis testing. In fact, estimation via Bayes' theorem can be both cheap and accurate, and "valid" if one sticks with estimation. Here's the gist: The "price of inference" is measured by the specificity of the alternative hypothesis, and (Bayesian, of course) parameter estimation can give you a good meal for a relatively small fee. However, I agree that paying more (in prior specificity) can take you from one dollar pizza to lobster: The more an inferencer (that's also a word now) is willing to pay, the more information she is able to inject into the posterior, thereby possibly improving inference. In fact, (strongly) regulating priors (ones that place most of the density near zero) improve the out of sample predictive performances of statistical models, and some argue that this is the yardstick by which statistical inference and model comparison ought to be made (Gelman et al., 2013; McElreath, 2016).
+
+In summary, estimation is a valid Bayesian form of inference with a flexible pricing model, but is unfortunately not well recognized in Rouder et al. (2016). In fact, in many situations with very little prior information (a rare situation, I admit), Bayes factors may be too expensive, and we may be better off withholding a strict hypothesis test in favor of estimation. 
+
+# Conclusion
+
+Psychological researchers are increasingly learning and applying Bayesian methods in published research. This is great, but I hope that researchers would also consider when it is appropriate to test hypotheses, and when it is appropriate to estimate (and when it's appropriate to call it a day and go home!). The Bayesian paradigm, with modern advances in MCMC methods (McElreath, 2016; Kruschke, 2014), allows estimation of a truly vast variety of models, leading to great flexibility in the kinds of questions one can ask of data and ultimately, psychological phenomena. If psychologists, in learning Bayesian methods, only focus on Bayes factors, I fear that they will miss this opportunity. 
+
+I'll leave the final words to the Band of Bayesians, who have more eloquently described what I've here tried to convey, and what I feel Rouder et al. (2016) has unfortunately downplayed:
+
+>For psychological science to be a healthy science, both estimation and hypothesis testing are needed. Estimation is necessary in pretheoretical work before clear predictions can be made, and is also necessary in posttheoretical work for theory revision. But hypothesis testing, not estimation, is necessary for testing the quantitative predictions of theories. Neither hypothesis testing nor estimation is more informative than the other; rather, they answer different questions. Using estimation alone turns science into an exercise in keeping records about the effect sizes in diverse experiments, producing a mas- sive catalogue devoid of theoretical content; using hypothesis testing alone may cause researchers to miss rich, meaningful structure in data. For researchers to obtain principled answers to the full range of questions they might ask, it is crucial for estimation and hypothesis testing to be advocated side by side. (Morey, Rouder, Verhagen, & Wagenmakers, 2014, p. 1290)
+
+[^1]: I use this term to refer to a group of authors in the most respectful way. 
+
+# References
+
+Cohen, J. (1994). The earth is round (p <. 05). American Psychologist, 49(12), 997.
+
+Gelman, A., Carlin, J. B., Stern, H. S., Dunson, D. B., Vehtari, A., & Rubin, D. B. (2013). Bayesian Data Analysis, Third Edition. Boca Raton: Chapman and Hall/CRC.
+
+Gigerenzer, G. (2004). Mindless statistics. The Journal of Socio-Economics, 33(5), 587–606. <http://doi.org/10.1016/j.socec.2004.09.033>
+
+Krantz, D. H. (1999). The Null Hypothesis Testing Controversy in Psychology. Journal of the American Statistical Association, 94(448), 1372–1381. <http://doi.org/10.2307/2669949>
+
+Kruschke, J. K. (2011). Bayesian Assessment of Null Values Via Parameter Estimation and Model Comparison. Perspectives on Psychological Science, 6(3), 299–312. <http://doi.org/10.1177/1745691611406925>
+
+Kruschke, J. K. (2014). Doing Bayesian Data Analysis: A Tutorial Introduction with R (2nd Edition). Burlington, MA: Academic Press.
+
+Kruschke, J. K., & Liddell, T. M. (2015). The Bayesian New Statistics: Two Historical Trends Converge. Available at SSRN 2606016. Retrieved from <http://www.valuewalk.com/wp-content/uploads/2015/05/SSRN-id2606016.pdf>
+
+McElreath, R. (2016). Statistical Rethinking: A Bayesian Course with Examples in R and Stan. CRC Press.
+
+Morey, R. D., Hoekstra, R., Rouder, J. N., Lee, M. D., & Wagenmakers, E.-J. (2015). The Fallacy of Placing Confidence in Confidence Intervals. Retrieved from <http://andrewgelman.com/wp-content/uploads/2014/09/fundamentalError.pdf>
+
+Morey, R. D., Romeijn, J.-W., & Rouder, J. N. (2016). The philosophy of Bayes factors and the quantification of statistical evidence. Journal of Mathematical Psychology. <http://doi.org/10.1016/j.jmp.2015.11.001>
+
+Morey, R. D., & Rouder, J. (2015). BayesFactor: Computation of Bayes Factors for Common Designs. Retrieved from <https://CRAN.R-project.org/package=BayesFactor>
+
+Morey, R. D., Rouder, J. N., Verhagen, J., & Wagenmakers, E.-J. (2014). Why Hypothesis Tests Are Essential for Psychological Science A Comment on Cumming (2014). Psychological Science, 25(6), 1289–1290. <http://doi.org/10.1177/0956797614525969>
+
+Rouder, J., Morey, R., & Wagenmakers, E.-J. (2016). The Interplay between Subjectivity, Statistical Practice, and Psychological Science. Collabra, 2(1). <http://doi.org/10.1525/collabra.28>
+
+Rouder, J. N., Morey, R. D., Verhagen, J., Province, J. M., & Wagenmakers, E.-J. (2016). Is There a Free Lunch in Inference? Topics in Cognitive Science, 8(3), 520–547. <http://doi.org/10.1111/tops.12214>
+
+Rouder, J. N., Speckman, P. L., Sun, D., Morey, R. D., & Iverson, G. (2009). Bayesian t tests for accepting and rejecting the null hypothesis. Psychonomic Bulletin & Review, 16(2), 225–237. <http://doi.org/10.3758/PBR.16.2.225>
+
+Wagenmakers, E.-J. (2007). A practical solution to the pervasive problems of p values. Psychonomic Bulletin & Review, 14(5), 779–804. <http://doi.org/10.3758/BF03194105>

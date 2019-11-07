@@ -1,0 +1,331 @@
+---
+title: Bayesian Estimation of Signal Detection Models, Part 1
+author: Matti Vuorre
+date: '2017-10-09'
+slug: bayesian-estimation-of-signal-detection-theory-models-part-1
+categories:
+  - psychology
+  - statistics
+tags:
+  - bayes
+  - brms
+  - modeling
+  - psychology
+  - R
+  - statistics
+  - tutorial
+draft: no
+output:
+  blogdown::html_page:
+    toc: yes
+    number_sections: no
+    toc_depth: 2
+summary: Signal Detection Theory (SDT) is a common framework for modeling memory and perception. Calculating point estimates of equal variance Gaussian SDT parameters is easy using widely known formulas. More complex SDT models, such as the unequal variance SDT model, require more complicated modeling techniques. These models can be estimated using Bayesian (nonlinear and/or hierarchical) regression methods, which are sometimes difficult to implement in practice. In this post, I describe how to estimate the equal variance Gaussian SDT model's parameters for a single participant with a Generalized Linear Model, and a nonlinear model. I describe the software implementation in R.
+bibliography: "`r here::here('static/bibliography/blog.bib')`"
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(knitr)
+library(brms)
+opts_chunk$set(warning = F, message = F, cache = T)
+theme_set(theme_linedraw())
+```
+
+This post is the first part of a series of three blog posts: In the second part, I describe how to estimate the equal variance Gaussian SDT model for multiple participants simultaneously, using hierarchical Bayesian models. In the third part, I describe how to estimate the unequal variance Gaussian SDT model as a hierarchical nonlinear Bayesian model.
+
+# Introduction
+
+Signal Detection Theory (SDT) is a common framework for modeling memory and perception. Calculating point estimates of equal variance Gaussian SDT parameters is easy using widely known formulas. More complex SDT models, such as the unequal variance SDT model, require more complicated modeling techniques. These models can be estimated using Bayesian (nonlinear and/or hierarchical) regression methods, which are sometimes difficult to implement in practice. In this post, I describe how to estimate the equal variance Gaussian SDT model's parameters for a single participant with a Generalized Linear Model, and a nonlinear model. I describe the software implementation in R.
+
+## Signal Detection Theory
+
+Consider a recognition memory experiment where participants are shown a series of images, some of which are new (participant has not seen before) and some of which are old (participant has seen before). Participants answer, for each item, whether they think they have seen the item before ("old!" response) or not ("new!" response). SDT models allow modeling participants' sensitivity and response criterion (a measure of response bias) separately, and can therefore be enormously useful in modeling the participants' memory processes.
+
+The conceptual basis of SDT models is that on each trial, when a stimulus is presented, participants have some inner "familiarity" (or memory strength) signal. The participants then decide, based on this familiarity signal, whether they have encountered the current stimulus stimulus previously ("old!") or not ("new!"). I assume that readers are at least somewhat familiar with the basics of SDT, and will not discuss the underlying theory further. A classic introduction to the topic is [@macmillan_detection_2005].
+
+## Example data
+
+We move on to examining a practical example using the R statistical programming environment [@r_core_team_r:_2017]. First, we load the tidyverse package [@wickham_tidyverse:_2016] which makes R programming much easier:
+
+```{r}
+library(tidyverse)
+```
+
+We'll use example data from the stdalt package [@wright_sdtalt:_2011]. The package used to be on CRAN but is no longer maintained, so it must be installed from GitHub:
+
+```{r geqvar-load-data, eval = F}
+devtools::install_github("cran/sdtalt")
+```
+
+The example data is called `confcontr`, and is provided as a data frame: "These are the data from the control group in Skagerberg and Wright's study of memory conformity. Basically, this is the simplest old/new recognition memory design." [@skagerberg_manipulating_2008]. 
+
+```{r}
+# install.packages("sdtalt")
+library(sdtalt)
+data(confcontr)
+```
+
+```{r, echo = F}
+confcontr <- as_tibble(confcontr) 
+confcontr
+```
+
+In this blog post, we use these data to estimate the equal variance Gaussian SDT model's parameters (*d'* and *c*) for one participant in this data set.
+
+# Equal Variance Gaussian SDT Model
+
+We consider the most common SDT model, that assumes the participants' distributions of familiarity signals are two Gaussian distributions with equal variances, but possibly different means (i.e. previously seen items elicit a stronger familiarity signal, on average). This model is known as the EVSDT model.
+
+We estimate the model for a single participant using three methods: "Manual" calculation of the point estimates using easy formulas translated to R code; estimating the model using a Bayesian Generalized Linear Model; and estimating the model using a Bayesian nonlinear model.
+
+## Calculate EVSDT parameters' point estimates
+
+We begin by calculating the maximum likelihood estimates of the EVSDT parameters, separately for each participant in the data set. Before doing so, I note that this data processing is only required for manual calculation of the point estimates; the modeling methods described below take the raw data and therefore don't require this annoying step.
+
+First, we'll compute for each trial whether the participant's response was a hit, false alarm, correct rejection, or a miss. We'll do this by creating a new variable, `type`:
+
+```{r sdtcalc-1}
+sdt <- confcontr %>% 
+    mutate(type = "hit",
+           type = ifelse(isold==1 & sayold==0, "miss", type),
+           type = ifelse(isold==0 & sayold==0, "cr", type),  # Correct rejection
+           type = ifelse(isold==0 & sayold==1, "fa", type))  # False alarm
+```
+
+Then we can simply count the numbers of these four types of trials for each participant, and put the counts on one row per participant. 
+
+```{r sdtcalc-2}
+sdt <- sdt %>% 
+    group_by(subno, type) %>% 
+    summarise(count = n()) %>% 
+    spread(type, count)  # Format data to one row per person
+```
+
+For a single subject, *d'* can be calculated as the difference of the standardized hit and false alarm rates [@stanislaw_calculation_1999]:
+
+$$d' = \Phi^{-1}(HR) - \Phi^{-1}(FAR)$$
+
+$\Phi$ is the cumulative normal density function, and is used to convert *z* scores into probabilities. Its inverse, $\Phi^{-1}$, converts a proportion (such as a hit rate or false alarm rate) into a *z* score. From here on, I refer to standardized hit and false alarm rates as *zHR* and *zFAR*, respectively. The response criterion *c* is given by the negative standardized false alarm rate [@decarlo_signal_1998]: -*zFAR*.
+
+We can use R's proportion to z-score function ($\Phi^{-1}$), `qnorm()`, to calculate each participant's *d'* and *c* from the counts of hits, false alarms, misses and correct rejections: 
+
+```{r sdtcalc-3}
+sdt <- sdt %>% 
+    mutate(zhr = qnorm(hit / (hit+miss)),
+           zfa = qnorm(fa / (fa+cr)),
+           dprime = zhr-zfa,
+           crit = -zfa)
+round(sdt, 2)
+```
+
+This data frame now has point estimates of every participant's *d'* and *c*. The implied EVSDT model for participant 53 is shown in Figure \@ref(fig:sdtplot-1).
+
+```{r sdtplot-1, echo = F, fig.cap = "The equal variance Gaussian signal detection model for the first participant in the data, based on manual calculation of the parameter's point estimates. The two distributions are the noise distribution (dashed) and the signal distribution (solid); the dotted vertical line represents the response criterion. d' is the distance between the peaks of the two distributions."}
+# Basic plot
+p1 <- ggplot(data.frame(x = seq(-5, 6, by = .05)), aes(x=x)) +
+    coord_cartesian(ylim = c(0, 0.5), xlim = c(-3.5, 4), expand = 0) +
+    labs(x = "Signal strength", y = "Probability")
+# Add noise & signal distributions, and criterion
+p1 + stat_function(fun=dnorm, geom = "line", lty = 2,
+                   args = list(mean=0, sd=1)) +
+    stat_function(fun=dnorm, geom = "line", 
+                  args = list(mean=sdt$dprime[1], sd=1)) +
+    geom_vline(xintercept = .5, lty = 3)
+```
+
+## Estimate EVSDT model with a GLM
+
+Generalized Linear Models (GLM) are a powerful class of regression models that allow modeling binary outcomes, such as our "old!" / "new!" responses. In `confcontr`, each row (trial) can have one of two responses, "old!" (`sayold = 1`) or "new!" (`sayold = 0`). We use GLM to regress these responses on the stimulus type: On each trial, the to-be-judged stimulus can be either new (`isold = 0`) or old (`isold = 1`). 
+
+In a GLM of binary outcomes, we assume that the outcomes are Bernoulli distributed (binomial with 1 trial), with probability $p_i$ that $y_i = 1$.
+
+$$y_i \sim Bernoulli(p_i)$$
+
+Because probabilities have upper and lower bounds at 1 and 0, and we wish to use a linear model (generalized *linear* model) of the *p* parameter, we don't model *p* with a linear model. Instead, we map *p* to a "linear predictor" $\eta$ with a link function, and model $\eta$ with a linear regression model. If this link function is probit, we have a "probit GLM":
+
+$$p_i = \Phi(\eta_i)$$
+
+$\Phi$ is again the cumulative normal density function and maps *z* scores to probabilities. We then model $\eta$ on an intercept and a slope:
+
+$$\eta_i = \beta_0 + \beta_1\mbox{isold}_i$$
+
+Given this parameterization, the intercept of the model ($\beta_0$) is going to be the standardized false alarm rate (probability of saying 1 when predictor is 0), which we take as our criterion *c*. The slope of the model is the increase of saying 1 when the predictor is 1, in *z*-scores, which is another way of saying *d'*. Therefore, $c = -zHR = -\beta_0$, and $d' = \beta_1$. 
+
+The connection between SDT models and GLM is discussed in detail by @decarlo_signal_1998. Two immediate benefits of thinking about SDT models in a GLM framework is that we can now easily include predictors on *c* and *d'*, and estimate SDT models with varying coefficients using hierarchical modeling methods [@decarlo_statistical_2010; @rouder_introduction_2005]. This latter point means that we can easily fit the models for multiple participants (and items!) simultaneously. We will return to this point in the second part of this blog post.
+
+Because we wrote the SDT model as a GLM, we have a variety of software options for estimating the model. Here, we use the Bayesian regression modeling R package brms [@burkner_brms:_2017; @stan_development_team_rstan:_2016], because its model formula syntax extends seamlessly to more complicated models that we will discuss later.
+
+We can estimate the GLM with brms's `brm()` function, by providing as arguments a model formula in brms syntax (identical to base R model syntax for simple models), an outcome distribution with a link function, and a data frame.
+
+brms's model syntax uses variable names from the data. We regress the binary `sayold` responses on the binary `isold` predictor with the following formula: `sayold ~ isold`.
+
+The second argument, the distribution of the outcomes, is specified with the `family` argument. To specify the bernoulli distribution with a probit link function, we use `family = bernoulli(link="probit")`.
+
+We will only model the first participant's data (`subno 53`), and therefore specify the data with `data = filter(confcontr, subno==53)`.
+
+The `brm()` function also allows specifying prior distributions on the parameters, but for this model we omit discussion of priors. Finally, to run multiple MCMC chains [@kruschke_doing_2014; @ravenzwaaij_simple_2016] in parallel, we set the `cores` argument to 4 (this makes the model estimation faster).
+
+Putting these pieces together, we estimate the SDT model as a probit GLM, using data stored in `confcontr`, for subject 53 only, with the following function: 
+
+```{r fit-glm, cache = T}
+library(brms)
+glmfit <- brm(sayold ~ isold, 
+              family = bernoulli(link="probit"), 
+              data = filter(confcontr, subno==53),
+              cores = 4,
+              file = here::here("static/data/sdtmodel1-1"))
+```
+
+The estimated model is saved in `glmfit`, whose `summary()` method returns the estimated parameters:
+
+```{r}
+summary(glmfit)
+```
+
+The regression parameters (`Intercept` (recall, $c = -\beta_0$) and `isold` ($d' = \beta_1$)) are described in the "Population-Level Effects" table, in the above output. `Estimate` reports the posterior means, which are comparable to maximum likelihood point estimates, and `Est.Error` reports the posterior standard deviations, which are comparable to standard errors. The next two columns report the parameter's 95% Credible Intervals (CIs). The estimated parameters' means match the point estimates we calculated by hand:
+
+```{r}
+round(sdt[1,], 2)
+```
+
+In fact, the posterior modes will exactly correspond to the maximum likelihood estimates, if we use uniform priors. The posterior density of *d'* and *c*, for participant 53, is illustrated in Figure \@ref(fig:densityplot): The maximum likelihood estimate is spot on the highest peak of the posterior density.
+
+```{r densityplot, echo = F, fig.cap = "The (approximate) joint posterior density of subject 53's SDT parameters. Lighter yellow colors indicate higher posterior density. The red dot indicates the 'manually' calculated MLE point estimate of d'."}
+library(viridis)
+p1 <- as.data.frame(glmfit)[,1:2] %>% 
+    ggplot(aes(b_isold, -b_Intercept)) +
+    scale_fill_viridis() +
+    stat_density_2d(aes(fill=..density..),
+                    geom = "raster", contour=F, show.legend = FALSE, n = 301) +
+    geom_point(data=sdt[1,], aes(x=dprime, y=crit), col="red", size = 2) +
+    coord_cartesian(expand = 0) +
+    labs(x = "d'", y = "Criterion") +
+    theme(aspect.ratio=1)
+p1 + labs(title = "EVSDT model's posterior distribution",
+          caption = "Model fitted to subject 53's data",
+          subtitle = "Estimated as GLM")
+```
+
+Figure \@ref(fig:densityplot) raises some interesting questions: What happens if we ignore the uncertainty in the estimated parameters (the colorful cloud of decreasing plausibility around the peak)? The answer is that not much happens for inference about averages by ignoring the subject-specific parameters' uncertainty, *if the design is balanced across participants.* But what will happen if we use the point estimates as predictors in some other regression, while ignoring their uncertainty? What are the implications of having very uncertain estimates? Should we trust the mode?
+
+In any case, I hope the above has illustrated that the equal variance Gaussian SDT parameters are easy to obtain within the GLM framework. Next, we describe how to estimate the SDT model using brms' nonlinear modeling syntax.
+
+## Estimate EVSDT with a nonlinear model
+
+A common generalization of the equal variance Gaussian SDT (EVSDT) model is to allow the signal distribution to have a different variance than that of the noise distribution. This model is known as the unequal variance Gaussian SDT model (UVSDT). However, the UVSDT model is nonlinear and requires a different approach to estimation.
+
+Fortunately, it turns out that the brms syntax also allows nonlinear models. We postpone discussing the UVSDT model to part 3 of this blog post, but here fit the GLM model from above using brms's nonlinear modeling syntax, as a precursor to fitting the UVSDT in part 3. 
+
+Here, we write the EVSDT model in a similar way as the GLM above, but simply flip the criterion and *d'*. This parameterization will give *c* directly, without the need to flip the estimated parameter value. Once we generalize this model to have unequal variances, in part 3, we have a nonlinear model. Therefore it will be useful to fit this small variation of the above GLM, to get familiar with brms' nonlinear modeling syntax. We write the model as follows [@decarlo_signal_1998]:
+
+$$p_i = \Phi(d'\mbox{isold}_i - c)$$
+
+This model gives us direct estimates of *c* and *d'*. Writing and estimating nonlinear models is considerably more involved than fitting GLMs. Accordingly, the code below is more complicated. The key point here is, however, that using brms, we can estimate models that may be nonlinear without deviating too far from basic formula syntax.
+
+First, we'll specify the model using the `bf()` function, shown below: 
+
+```{r}
+m2 <- bf(sayold ~ Phi(dprime*isold - c), 
+         dprime ~ 1, c ~ 1, 
+         nl = TRUE)
+```
+
+Let's walk through this code line by line. On the first line, we specify the model of `sayold` responses. Recall that we are modeling the responses as Bernoulli distributed (this will be specified as an argument to the estimation function, below). Therefore, the right-hand side of the first line (after ~) is a model of the probability parameter ($p_i$) of the Bernoulli distribution.
+
+The two unknown parameters in the model, *d'* and *c*, are estimated from data, as indicated by the second line (i.e. `dprime ~ 1`). The third line is required to tell brms that the model is nonlinear. To further understand how to write models with brms' nonlinear modeling syntax, see the appropriate brms vignette (`vignette("brms_nonlinear", package = "brms")`). We extend this syntax to the nonlinear (hierarchical) unequal variances model in Part 3.
+
+Because the parameters of nonlinear models can be more difficult to estimate, brms requires the user to set priors when `nl = TRUE`. We set somewhat arbitrary priors on `dprime` and `c` (the scale parameter is standard deviation, not variance):
+
+```{r}
+Priors <- c(prior(normal(.5, 1.5), nlpar = "dprime"),
+            prior(normal(0, 1.5), nlpar = "c"))
+```
+
+After specifying the model and priors, fitting the model is done again using `brm()` with only a few adjustments: because we specified the link function inside `bf()`, we should explicitly set `link="identity"` in the `family` argument. Because nonlinear models are trickier to estimate, we also adjust the underlying Stan sampler's `adapt_delta` parameter (this will make the MCMC a little slower but will return more accurate results).
+
+```{r fit2, cache = T}
+fit2 <- brm(m2, 
+            family = bernoulli(link="identity"), 
+            data = filter(confcontr, subno==53),
+            prior = Priors,
+            control = list(adapt_delta = .99),
+            cores = 4,
+            file = here::here("static/data/sdtmodel1-2"))
+```
+
+Notice that we now entered `m2` as the first argument, whereas with the first model, we simply wrote the formula inside the `brm()` function. These two ways are equivalent, but because this model is more complicated, I saved it into a variable as a separate line of code. 
+
+We can then compare the two models' estimated parameters. Recall that the latter model directly reports the - standardized false alarm rate (*c*). For technical reasons, the parameters are renamed with a `_Intercept` in the output below:
+
+```{r}
+summary(glmfit)
+summary(fit2)
+```
+
+The results are very similar, but note that priors were included only in the nonlinear syntax model. The only real difference is that the MCMC algorithm explored `fit2`'s posterior less efficiently, as shown by the smaller `Eff.Sample` for both parameters. This means that the random draws from the posterior distribution, for `fit2`, have greater autocorrelation, and therefore we should possibly draw more samples for more accurate inference.  The posterior distributions obtained with the 2 methods are shown in Figure \@ref(fig:densityplot2).
+
+```{r densityplot2, echo = F, cache = T, fig.cap = "Top row: The (approximate) joint posterior density of subject 53's SDT parameters, estimated with the GL model and the nonlinear model. Lighter yellow colors indicate higher posterior density. The red dot indicates the sample mean d' that was calculated 'manually'. Bottom row: The marginal posterior densities of c and dprime from GLM (red) and nonlinear (blue) models."}
+library(viridis)
+p2 <- as.data.frame(fit2)[,1:2] %>%
+    ggplot(aes(b_dprime_Intercept, b_c_Intercept)) +
+    scale_fill_viridis() +
+    stat_density_2d(aes(fill=..density..), 
+                    geom = "raster", contour=F, show.legend = FALSE, n = 301) +
+    geom_point(data=sdt[1,], aes(x=dprime, y=crit), col="red", size = 2) +
+    coord_cartesian(expand = 0) +
+    labs(x = "d'", y = "Criterion") +
+    theme(aspect.ratio=1)
+pst1 <- posterior_samples(glmfit, pars = "b_") %>% 
+    rename(c = b_Intercept, dprime = b_isold) %>% 
+    mutate(c = -c)
+pst2 <- posterior_samples(fit2, pars = "b_") %>% 
+    rename(c = b_c_Intercept, dprime = b_dprime_Intercept)
+p3 <- bind_rows(pst1, pst2, .id = "Model") %>% 
+    as_tibble() %>% 
+    mutate(Model = ifelse(Model==1, "GLM", "Nonlinear")) %>% 
+    gather(parameter, value, c:dprime) %>% 
+    ggplot(aes(x=value, fill = Model, col = Model)) +
+    scale_fill_brewer(palette = "Set1") +
+    stat_density(geom="area", position = position_identity(), 
+                 alpha = .4) +
+    coord_cartesian(ylim = c(0, 2.5), expand = 0) +
+    facet_wrap("parameter", strip.position = "bottom") +
+    theme(legend.position = "none", 
+          strip.text = theme_get()$axis.text,
+          strip.background = element_blank(),
+          axis.title.x = element_blank(), 
+          strip.placement = "outside")
+cowplot::plot_grid(
+    cowplot::plot_grid(p1 + labs(title = "GLM") + 
+                           coord_cartesian(ylim = c(-.2, .8), xlim = c(-.3, 1.2)), 
+                       p2 + labs(title = "Nonlinear syntax") +  
+                           coord_cartesian(ylim = c(-.2, .8), xlim = c(-.3, 1.2))), 
+    p3, nrow=2)
+```
+
+There is little benefit in using the second, "nonlinear" parameterization of EVSDT in this case. However, in part 3 we will use it to estimate the UVSDT model, and therefore it is useful to study this simpler case to make it easier to understand how to fit truly nonlinear models with brms.
+
+# Discussion
+
+## Fitting one subject's EVSDT model with different methods
+
+We have now estimated the equal variance Gaussian SDT model's parameters for one subject's data using three methods: Calculating point estimates manually, with a probit GLM, and with a probit model using brms' nonlinear modeling syntax. The main difference between these methods, so far, is that the modeling methods provide estimates of uncertainty in the parameters, whereas the manual calculation does not. This point leads us directly to hierarchical models [@rouder_introduction_2005; @rouder_signal_2007], which we discuss in part 2 of this blog post.
+
+However, there are other, perhaps more subtle, benefits of using a regression model framework for estimating SDT models. There is something to be said, for example, about the fact that the models take the raw data as input. 'Manual' calculation involves, well, manual computation of values, which may be more error prone than using raw data. This is especially clear if the modeling methods are straightforward to apply: I hope to have illustrated that with R and brms [@burkner_brms:_2017], Bayesian modeling methods are easy to apply and accessible to a wide audience. 
+
+Moving to a modeling framework will also allow us to include multiple sources of variation, such as heterogeneity across items and participants, through crossed "random" effects [@rouder_signal_2007], and covariates that we think might affect the SDT parameters. By changing the link function, we can also easily use other distributions, such as logistic, to represent the signal and noise distributions [@decarlo_signal_1998; @decarlo_statistical_2010].
+
+## Prior distribution
+
+Finally, priors.
+
+![Figure 4: Typical reviewer 2's response to a manuscript that reports using prior distributions on parameters.](../../../img/2017/priors-not-on.jpg)
+
+Newcomers to the Bayesian modeling framework might object to the use of prior distributions, and think that they are unduly biasing the results. However, moderately informative priors usually have far less of an influence on inference than newcomers might assume. Above, we specified the GLM with practically no prior information; if you are reluctant to include existing knowledge into your model, feel free to leave it out. Things are, unfortunately, a little more complicated with the nonlinear modeling functions: The posterior geometry might be funky (technical term), in which case the priors could mainly serve to nudge the posterior samples to be drawn from sensible parameter values.
+
+Further, priors can be especially useful in estimating SDT models: If participants' hit or false alarm rates are 0 or 1--a fairly common scenario--mild prior information can be used in a principled manner to release the estimated quantities from hostile captivity of the boundary values. Literature has discussed various corrections to 0 and 1 rates [@stanislaw_calculation_1999]. However, Bayesian priors can take care of these edge cases in a more principled manner. This point will become especially salient in the next installment of this blog post, where we focus on hierarchical SDT models.
+
+Thanks for reading.
+
+# References

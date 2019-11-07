@@ -1,0 +1,265 @@
+---
+title: "Plots with subplots in R"
+author: "Matti Vuorre"
+date: 2016-03-15
+categories : ["statistics"]
+tags: ["R", "data visualization", "tutorial"]
+description: "Some tips on creating figures with multiple panels in R"
+---
+
+```{r setup, echo=F, warning=FALSE, message=FALSE}
+library(knitr)
+library(readr)
+library(tidyverse)
+opts_chunk$set(
+    fig.retina = 2,
+    fig.align = 'center', 
+    comment = "#", 
+    warning = F, 
+    message = F, 
+    cache = T,
+    fig.width=9,
+    fig.height=6
+)
+theme_set(theme_linedraw())
+```
+
+Visualizations are great for learning from data, and communicating the results of a statistical investigation. In this post, I illustrate how to create [__small multiples__](https://en.wikipedia.org/wiki/Small_multiple) from data using __R__ and __ggplot2__.
+
+Small multiples display the same basic plot for many different groups simultaneously. For example, a data set might consist of a X ~ Y correlation measured simultaneously in many countries; small multiples display each country's correlation in its own panel. Similarly, you might have conducted a within-individuals experiment, and would like to display the effects of the repeated-measures factors simultaneously at the average level, and at the individual level--thus showing each individual's results in a separate panel. Whenever you would like to show the same figure, but separately for many subsets of the data, the appropriate google term is ["small multiples"](http://lmgtfy.com/?q=small+multiples).
+
+# Example Data
+
+The data I'll use here consist of 20k responses to the Big 5 personality questionnaire from various countries, and can be found [here](http://personality-testing.info/_rawdata/). I have discussed the data in an introductory R tutorial [here](http://mvuorre.github.io/toolbox/questionnaire/questionnaire.html).
+
+```{r readdata}
+library(readr)
+d <- read_tsv(url("https://vuorre.netlify.com/data/big5.csv"))
+```
+
+This data frame is a bit of a mess, so in the next section I'll clean it up; if you'd like to jump straight to the plots, click [here](#univariate-plots)
+
+
+## Data wrangling
+
+First, I'll change factor labels of `race` and `gender` variables to something more meaningful.
+
+```{r manip_1}
+library(dplyr)
+rlabs <- c("NA", "mixed_race", "arctic", "caucasian_european", "caucasian_indian", "caucasian_middle_east", "caucasian_n_africa_other", "indigenous_australian", "native_american", "north_east_asian", "pacific", "south_east_asian", "west_african", "other")
+d <- mutate(
+    d, 
+    race = factor(race, labels = rlabs),
+    gender = factor(gender, labels = c("NA", "male", "female", "other"))
+)
+```
+
+Then, I'll change the country names to actual country names from abbreviations
+
+```{r manip_2}
+library(countrycode)
+d$country <- countrycode(sourcevar = d$country, 
+                         origin = "iso2c",
+                         destination = "country.name")
+```
+
+Then I remove all rows where `gender` or `race` was missing or "other". Also some people reported their age in the thousands, so I'll only include plausible values.
+
+```{r manip_3}
+d <- filter(d, !(gender %in% c("NA", "other") | race %in% c("NA", "other")))
+d <- filter(d, age < 100)
+```
+
+Then, compute the mean of each Big five category
+
+```{r manip_4}
+d <- add_rownames(d, "id") %>%
+    group_by(id) %>%
+    mutate(extraversion = mean(c(E1, E2, E3, E4, E5, E6, E7, E8, E9, E10)),
+           openness = mean(c(O1, O2, O3, O4, O5, O6, O7, O8, O9, O10)),
+           agreeableness = mean(c(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10)),
+           neuroticism = mean(c(N1, N2, N3, N4, N5, N6, N7, N8, N9, N10)),
+           conscientiousness = mean(c(C1, C2, C3, C4, C5, C6, C7, C8, C9, C10))) %>%
+    ungroup()
+```
+
+Then I'll get rid of variables I won't be using, and display the output
+
+```{r disp_data}
+d <- select(d, -c(id, engnat, hand, source, E1:O10))
+d
+```
+
+# Univariate plots
+
+I'll start with displaying histograms of the outcome variables (the individual-specific Big 5 category means). Picking up a variable to plot in __ggplot2__ is done by specifying the column to plot, so to select a specific Big 5 category, I just tell __ggplot2__ to plot it on the x axis.
+
+```{r first_plot}
+library(ggplot2)
+ggplot(d, aes(x = openness)) +
+    geom_histogram()
+```
+
+## The __ggplot2__ facetting philosophy
+
+Next, we'll be drawing the same figure, but display all Big 5 categories using small multiples. __ggplot2__ calls small multiples __"facets"__, and the operation is conceptually to subset the input data frame by values found in one of the data frame's columns.
+
+The key to using facets in __ggplot2__ is to make sure that the data is in long format; I would like to display histograms of each category in separate facets, so I'll need to reshape the data from wide (each category in its own column) to long form (a column with category labels, and another with the value). __tidyr__ provides a good tool for the job: `gather()`
+
+```{r}
+library(tidyr)
+ld <- tidyr::gather(d, category, value, extraversion:conscientiousness)
+ld
+```
+
+The values for each Big 5 categories are now in the same column, called `value`. Each observation, aka row in the data, contains all variables associated with that observation. This is the essence of long form data. We can now use the `category` variable to subset the data to subplots for each category.
+
+## Basic facets
+
+### Display all categories in small multiples
+
+Now that `value` holds all mean Big 5 category values, asking `ggplot()` to plot it on the x-axis is not too meaningful. However, because we have another column identifying each observations' (row) category, we can pass it to `facet_wrap()` to split the histograms by category. Making use of the long data form with facets is easy:
+
+```{r}
+ggplot(ld, aes(x = value)) +
+    geom_histogram(fill = "grey20", binwidth = .1) +
+    facet_wrap("category")
+```
+
+Perfect! The same works for any arbitrary variable that we can think of as a meaningful grouping factor.
+
+### Display different "race's" openness in small multiples
+
+Because the `value` column contains values of all categories, I need to specify which category to display by subsetting the data. I use data wrangling verbs from the __dplyr__ package to subset the data on the fly, and pass the resulting objects to further functions using the pipe operator `%>%`. For more information on this workflow, see eg. [this website](http://zevross.com/blog/2015/01/13/a-new-data-processing-workflow-for-r-dplyr-magrittr-tidyr-ggplot2/).
+
+```{r}
+# Filter out all rows where category is "openness", and pass forward
+filter(ld, category == "openness") %>%
+    # Place value on x-axis
+    ggplot(aes(x = value)) +
+    # Histogram
+    geom_histogram(fill = "grey20", binwidth = .1) +
+    # Facet by "race"
+    facet_wrap("race")
+```
+
+That didn't quite work, because in an observational study such as this one, the design is far from balanced; each "race" category has a different number of observations. 
+
+#### Adjusting facet scales
+
+I can ask `facet_wrap()` to use different axis scales for each subplot:
+
+```{r}
+filter(ld, category == "openness") %>%
+    ggplot(aes(x = value)) +
+    geom_histogram(fill = "grey20", binwidth = .1) +
+    facet_wrap("race", scales = "free_y")  # Allow y-axis scale to vary
+```
+
+Brilliant. What's clearly visible is that the number of observation varies between the levels of the facetting variable. 
+
+### Visually tabulate age by gender
+
+What are the respondent's age distributions across `gender`? Small multiples to the rescue:
+
+```{r age_by_gender}
+ggplot(ld, aes(x = age)) +
+    geom_histogram(fill = "#31a354") +  # Fun with colors!
+    facet_wrap("gender")
+```
+
+## The Facetting Formula
+
+We repeatedly called `facet_wrap("variable")` to separate the plot to several facets, based on `variable`. However, we're not restricted to one facetting variable, and can enter multiple variables simultaneously. To illustrate, I'll plot all categories separately for each gender:
+
+```{r}
+ggplot(ld, aes(x = value)) +
+    geom_histogram(fill = "#31a354") +
+    facet_wrap(gender~category)
+```
+
+However, it is now difficult to see the multiple category labels, and to separate them to rows and columns, we can use `facet_grid()`:
+
+```{r}
+ggplot(ld, aes(x = value)) +
+    geom_histogram(fill = "#31a354") +
+    facet_grid(gender~category)
+```
+
+The argument to the left of the tilde in `facet_grid()` specifies the rows (here `gender`), the one after the tilde specifies the columns (here `category`).
+
+# Ordering facets
+
+Sometimes it is helpful to convey information through structure. One way to do this with subplots is to arrange the subplots in a meaningful manner, such as a data summary, or even a summary statistic. Ordering subplots allows the observer to quickly learn more from the figure, even though it still presents the same information, only differently arranged.
+
+## Order facets by number of observations
+
+To order subplots, we need to add the variable that we would like to order by to the data frame. Here we add a "number of observations" column to the data frame, then order the facetting variable on that variable. I'm making heavy use of the __dplyr__ pipe in order to avoid saving intermediate objects. The following code snippet takes all openness-rows of `ld`, calculates `nobs` for each "race"--hence the `group_by(race)`, and replaces old `race` with a new one, where the "race" labels are ordered based on the value of `nobs`. The result is visible in a figure where the number of observations in each facet increases from top left to bottom right.
+
+```{r}
+filter(ld, category == "openness") %>%
+    group_by(race) %>%
+    mutate(nobs = n()) %>%
+    ungroup() %>%
+    mutate(race = reorder(race, nobs)) %>%  # The important bit
+    ggplot(aes(x = value)) +
+    geom_histogram(fill = "grey20", binwidth = .1) +
+    facet_wrap("race", scales = "free_y")
+```
+
+Perhaps unsurprisingly, the largest portion of the sample is "caucasian european".
+
+## Order facets by summary statistic
+
+Next, I'll order the facets by the mean `openness` for each subplot.
+
+```{r}
+filter(ld, category == "openness") %>%
+    group_by(race) %>%
+    mutate(mobs = mean(value)) %>%
+    ungroup() %>%
+    mutate(race = reorder(race, mobs)) %>%
+    ggplot(aes(x = value)) +
+    geom_histogram(fill = "grey20", binwidth = .1) +
+    geom_point(aes(x = mobs, y = 0), col = "red", size = 2) +
+    facet_wrap("race", scales = "free_y")
+```
+
+The means of `openness` across `race` are pretty much identical!
+
+# Arbitrary Subplots & Ordering on Slope
+
+The previous workflow depended on having all required information in the same data frame. I'll end this post by highlighting a really cool method for combining arbitrary plots together to form small multiples: the __gridExtra__ package. As a bonus, I'll also illustrate how to order facets by the strength of the value ~ age relationship.
+
+```{r}
+library(gridExtra)
+# The code here is a little more complex:
+# I'll order the subplots on the slope of a linear model,
+# so I need to reorder the categories on the slope
+ld <- ld %>% group_by(category) %>%
+    do(lmod = lm(value ~ age, data = .)) %>%
+    mutate(slope = coef(lmod)[[2]]) %>% 
+    ungroup() %>%
+    select(-lmod) %>%
+    right_join(ld, .) %>%
+    mutate(category = reorder(category, slope))
+p1 <- ggplot(ld, aes(x = age, y = value)) +
+    geom_point(alpha = .05) +
+    geom_smooth(method = "lm") +
+    facet_wrap("category", ncol = 5)
+p2 <- ggplot(ld, aes(x = value)) +
+    geom_histogram() +
+    facet_grid(gender ~ category)
+grid.arrange(p1, p2, ncol = 1, heights = c(4, 6))  # I'll make the top plot a little smaller
+```
+
+Well, I probably wouldn't brag about how nice or informative this plot is... However, the point is that with `facet_wrap()` and `facet_grid()` you can create subplots from data contained within a data frame. If this is no longer an option, `grid.arrange()` allows combining arbitrary __ggplot2__ objects into a single figure.
+
+# References
+
+* [dplyr](https://CRAN.R-project.org/package=dplyr)
+* [ggplot2](http://had.co.nz/ggplot2/book)
+* [gridExtra](https://CRAN.R-project.org/package=gridExtra)
+* [readr](https://github.com/hadley/readr)
+* [knitr](https://cran.rstudio.com/web/packages/knitr/)
+

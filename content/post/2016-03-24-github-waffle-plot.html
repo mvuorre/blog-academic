@@ -1,0 +1,115 @@
+---
+title: "GitHub-style waffle plots in R"
+author: "Matti Vuorre"
+date: 2016-03-24
+categories : ["data science"]
+tags: ["R", "data visualization", "tutorial"]
+description: "Plotting activity over time in R with ggplot2."
+draft: false
+---
+
+
+
+<p>In this post, I’ll show how to create GitHub style “waffle” plot in <a href="https://cran.r-project.org/">R</a> with the <a href="http://had.co.nz/ggplot2/book">ggplot2</a> plotting package.</p>
+<div id="simulate-activity-data" class="section level1">
+<h1>Simulate activity data</h1>
+<p>First, I’ll create a data frame for the simulated data, initializing the data types:</p>
+<pre class="r"><code>library(dplyr)
+d &lt;- data_frame(
+    date = as.Date(1:813, origin = &quot;2014-01-01&quot;),
+    year = format(date, &quot;%Y&quot;),
+    week = as.integer(format(date, &quot;%W&quot;)) + 1,  # Week starts at 1
+    day = factor(weekdays(date, T), 
+                 levels = rev(c(&quot;Mon&quot;, &quot;Tue&quot;, &quot;Wed&quot;, &quot;Thu&quot;,
+                                &quot;Fri&quot;, &quot;Sat&quot;, &quot;Sun&quot;))),
+    hours = 0)</code></pre>
+<p>And then simulate hours worked for each date. I’ll simulate hours worked separately for weekends and weekdays to make the resulting data a little more realistic, and also simulate missing values to data (that is, days when no work occurred).</p>
+<pre class="r"><code>set.seed(1)
+# Simulate weekends
+weekends &lt;- filter(d, grepl(&quot;S(at|un)&quot;, day))
+# Hours worked are (might be) poisson distributed
+weekends$hours &lt;- rpois(nrow(weekends), lambda = 4)
+# Simulate missing days with probability .7
+weekends$na &lt;- rbinom(nrow(weekends), 1, 0.7)
+weekends$hours &lt;- ifelse(weekends$na, NA, weekends$hours)
+
+# Simulate weekdays
+weekdays &lt;- filter(d, !grepl(&quot;S(at|un)&quot;, day))
+weekdays$hours &lt;- rpois(nrow(weekdays), lambda = 8)  # Greater lambda
+weekdays$na &lt;- rbinom(nrow(weekdays), 1, 0.1)  # Smaller p(missing)
+weekdays$hours &lt;- ifelse(weekdays$na, NA, weekdays$hours)
+
+# Concatenate weekends and weekdays and arrange by date
+d &lt;- bind_rows(weekends, weekdays) %&gt;% 
+    arrange(date) %&gt;%  # Arrange by date
+    select(-na)  # Remove na column
+d</code></pre>
+<pre><code># # A tibble: 813 x 5
+#    date       year   week day   hours
+#    &lt;date&gt;     &lt;chr&gt; &lt;dbl&gt; &lt;fct&gt; &lt;int&gt;
+#  1 2014-01-02 2014      1 Thu       6
+#  2 2014-01-03 2014      1 Fri      13
+#  3 2014-01-04 2014      1 Sat      NA
+#  4 2014-01-05 2014      1 Sun      NA
+#  5 2014-01-06 2014      2 Mon       9
+#  6 2014-01-07 2014      2 Tue       5
+#  7 2014-01-08 2014      2 Wed      NA
+#  8 2014-01-09 2014      2 Thu       9
+#  9 2014-01-10 2014      2 Fri       8
+# 10 2014-01-11 2014      2 Sat      NA
+# # ... with 803 more rows</code></pre>
+</div>
+<div id="waffle-plot-function" class="section level1">
+<h1>Waffle-plot function</h1>
+<p>Then I’ll create a function that draws the waffle plot. If you have similarly structured data, you can copy-paste the function and use it on your data (but make sure the following packages are installed.)</p>
+<pre class="r"><code>library(ggplot2)
+library(viridis)  # Color palette
+library(ggthemes)
+gh_waffle &lt;- function(data, pal = &quot;D&quot;, dir = -1){
+    
+    p &lt;- ggplot(data, aes(x = week, y = day, fill = hours)) +
+        scale_fill_viridis(name=&quot;Hours&quot;, 
+                           option = pal,  # Variable color palette
+                           direction = dir,  # Variable color direction
+                           na.value = &quot;grey93&quot;,
+                           limits = c(0, max(data$hours))) +
+        geom_tile(color = &quot;white&quot;, size = 0.4) +
+        facet_wrap(&quot;year&quot;, ncol = 1) +
+        scale_x_continuous(
+            expand = c(0, 0),
+            breaks = seq(1, 52, length = 12),
+            labels = c(&quot;Jan&quot;, &quot;Feb&quot;, &quot;Mar&quot;, &quot;Apr&quot;, &quot;May&quot;, &quot;Jun&quot;,
+                       &quot;Jul&quot;, &quot;Aug&quot;, &quot;Sep&quot;, &quot;Oct&quot;, &quot;Nov&quot;, &quot;Dec&quot;)) +
+        theme_tufte(base_family = &quot;Helvetica&quot;) +
+        theme(axis.title = element_blank(),
+              axis.ticks = element_blank(),
+              legend.position = &quot;bottom&quot;,
+              legend.key.width = unit(1, &quot;cm&quot;),
+              strip.text = element_text(hjust = 0.01, face = &quot;bold&quot;, size = 12))
+    
+    print(p)
+}</code></pre>
+<div id="using-the-waffle-plot-function" class="section level2">
+<h2>Using the waffle plot function</h2>
+<p><code>gh_waffle()</code> takes three arguments, the first, <code>data</code> is a data frame with columns <code>date</code> (type: Date), <code>year</code> (number or character), <code>week</code> (number), <code>day</code> (an ordered factor to make days run from top to bottom on the graph), and <code>hours</code> (number). The second option to <code>gh_waffle()</code>, <code>pal</code> specifies one of four color palettes used by the <code>viridis</code> color scale, and can be <code>"A"</code>, <code>"B"</code>, <code>"C"</code>, or <code>"D"</code>. The default is “D”, which is also what GitHub uses. The last option, <code>dir</code> specifies the direction of the color scale, and can be either <code>-1</code> or <code>1</code>. The GitHub default is -1.</p>
+<p>Using <code>gh_waffle()</code> with the default settings, only providing the data frame <code>d</code>, gives the following result:</p>
+<pre class="r"><code>gh_waffle(d)</code></pre>
+<p><img src="/post/2016-03-24-github-waffle-plot_files/figure-html/viz-1.png" width="864" style="display: block; margin: auto;" /></p>
+<p>Here’s the same plot with the three other color palettes:</p>
+<pre class="r"><code>for (pal in c(&quot;A&quot;, &quot;B&quot;, &quot;C&quot;)) {
+    gh_waffle(d, pal)
+}</code></pre>
+<p><img src="/post/2016-03-24-github-waffle-plot_files/figure-html/viz2-1.png" width="864" style="display: block; margin: auto;" /><img src="/post/2016-03-24-github-waffle-plot_files/figure-html/viz2-2.png" width="864" style="display: block; margin: auto;" /><img src="/post/2016-03-24-github-waffle-plot_files/figure-html/viz2-3.png" width="864" style="display: block; margin: auto;" /></p>
+<p>Unless you’re plotting some really awful events, I think it’s best to stick with the default color palette. That’s it for today folks.</p>
+</div>
+</div>
+<div id="further-reading-references" class="section level1">
+<h1>Further reading &amp; references</h1>
+<ul>
+<li><a href="http://rud.is/b/2016/02/14/making-faceted-heatmaps-with-ggplot2/">Faceted heatmaps with ggplot2</a> (Inspiration for this post.)</li>
+<li><a href="https://CRAN.R-project.org/package=dplyr">dplyr</a></li>
+<li><a href="http://had.co.nz/ggplot2/book">ggplot2</a></li>
+<li><a href="https://github.com/sjmgarnier/viridis">viridis</a></li>
+<li><a href="https://github.com/jrnold/ggthemes">ggthemes</a></li>
+</ul>
+</div>

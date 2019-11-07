@@ -1,0 +1,133 @@
+---
+title: SIPS 2017 Conference Tweets
+author: Matti Vuorre
+date: '2017-08-03'
+slug: sips-2017-conference-tweets
+categories:
+  - psychology
+tags:
+  - data visualization
+  - psychology
+  - SIPS
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 1
+draft: no
+bibliography: "`r here::here('static/bibliography/blog.bib')`"
+summary: "Exploring SIPS Tweets with R."
+---
+
+```{r setup, include=F}
+library(rtweet)
+library(tidytext)
+library(tidyverse)
+theme_set(theme_linedraw())
+knitr::opts_chunk$set(error = T, echo = F, message = F, cache = T)
+```
+
+```{r save-data, eval = F}
+tweets <- search_tweets("#SIPS2017", 5000)
+save(tweets, file = "static/data/sips-2017-twitter.rda")
+```
+
+The second annual meeting of the Society for the Improvement of Psychological Science ([SIPS](https://osf.io/jtcu9/)) is over, sadly. The event was actively tweeted with [#SIPS2017](https://twitter.com/hashtag/SIPS2017), so we can use R to explore the tweets related to the conference. In this blog post, I do a small retrospective on the event by accessing and visualizing the SIPS tweets through Twitter's API.
+
+# Obtaining Data
+
+"Accessing an API" sounds like a big deal, but fortunately [there's an R package for that](https://www.youtube.com/watch?v=yhTerzNFLbo). I used the **rtweet** package [@rtweet-package] to download 2829 tweets with the #SIPS2017 hashtag. I saved the resulting data, which can be loaded with the following R command:
+
+```{r load-data, echo = T}
+load(here::here("static/data/sips-2017-twitter.rda"))
+```
+
+# Timeline of Tweets
+
+The timeline of tweets reveals that SIPSers were most active on Twitter on Monday, and there's a clear spike of activity at 6pm on Monday.
+
+```{r, fig.height = 3}
+library(lubridate)
+days <- c("Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday")
+tweets %>% 
+    mutate(datetime = as_datetime(created_at, tz = Sys.timezone()),
+           hour = hour(datetime),
+           weekday = wday(datetime, label = T, abbr = F)) %>%
+    filter(weekday %in% days) %>%
+    mutate(weekday = factor(weekday, levels = days)) %>% 
+    group_by(date = as_date(datetime), weekday, hour) %>%
+    count(sort = T) %>%
+    ggplot(aes(hour, n)) +
+    geom_bar(stat = "identity", col = "black", fill = "black") +
+    labs(x="Time", y="Tweets", title="#SIPS2017 Twitter activity") +
+    facet_wrap("weekday", nrow = 1) +
+    coord_cartesian(expand = 0, ylim = c(0, 250)) +
+    theme(panel.spacing = unit(0, "cm"))
+```
+
+# Top tweets
+
+Here are the top 5 SIPS non-retweets.
+
+```{r, eval = T, results = 'asis'}
+tweets %>% 
+    filter(!is_retweet) %>% 
+    arrange(desc(retweet_count)) %>% 
+    rename(retweets = retweet_count) %>% 
+    select(screen_name, created_at, retweets, text) %>% 
+    slice(1:5) %>% 
+    mutate(text = gsub("@", "", text)) %>% 
+    knitr::kable(format = "html")
+```
+
+# Top Hashtags
+
+Here are the top hashtags people used with the SIPS hashtag.
+
+```{r}
+tweets %>% 
+    unnest_tokens(tags, hashtags) %>% 
+    count(tags, sort = T) %>% 
+    filter(n > 1, tags != "sips2017") %>% 
+    ggplot(aes(n, reorder(tags, n) )) +
+    geom_point() +
+    labs(title = "Most tweeted tags at SIPS 2017",
+         x="Number of tweets", y="Hashtag") 
+```
+
+# Who mentioned who in their tweets?
+
+And finally the obligatory graph: Arrows represent tweets going from someone to someone else.
+
+```{r, eval = T, warning = F, fig.width = 12, fig.height = 12}
+library(igraph)
+g <- tweets %>% 
+    filter(!is.na(mentions_screen_name)) %>% 
+    select(screen_name, mentions_screen_name) %>% 
+    mutate(mentions_screen_name = strsplit(mentions_screen_name, " ")) %>% 
+    unnest(mentions_screen_name) %>% 
+    graph_from_data_frame(directed = T)
+V(g)$label <- V(g)$name
+V(g)$id <- V(g)$name
+
+plot(g,
+     margin = -.12,
+     layout = layout_on_sphere(g),
+     edge.color = adjustcolor("dodgerblue1", .25),
+     edge.arrow.size = .5,
+     edge.width = 1.1,
+     vertex.color = adjustcolor("dodgerblue1", .1),
+     vertex.frame.color=adjustcolor("dodgerblue1", .2),
+     vertex.size = 2,
+     vertex.label.family = "Helvetica",
+     vertex.label.font = 1,
+     vertex.label.color = "black",
+     vertex.label.cex = sqrt(1.5+degree(g))/8,
+     vertex.label = ifelse(degree(g, mode = "in") > 30, V(g)$label, NA))
+```
+
+
+
+You'll find the full source code of this blog post on my [GitHub page](https://github.com/mvuorre/blog).
+
+# References

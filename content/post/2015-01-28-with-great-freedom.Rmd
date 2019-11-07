@@ -1,0 +1,22 @@
+---
+title: "Where are the keys to my F-16?"
+author: "Matti Vuorre"
+date: 2015-01-28
+categories: ["statistics"]
+tags: ["bayes"]
+description: "With great freedom comes great responsibility."
+---
+
+The average psychologist's statistical toolkit is expanding. Multilevel (mixed effects) models are now routinely used where 10 years ago repeated measures ANOVA prevailed. Bayesian statistics are coming. Isn't this fantastic?
+
+Well, yes and no. Here is a quote about the use of [multilevel models by psycholinguists](http://www.sciencedirect.com/science/article/pii/S0749596X12001180):
+
+>At a recent workshop on mixed-effects models, a prominent psycholinguist memorably quipped that **encouraging psycholinguists to use linear mixed-effects models was like giving shotguns to toddlers**. Might the field be better off without complicated mixed-effects modeling, and the potential for misuse it brings?
+
+And here is a quote about the increasing [use of Bayesian statistics](http://www.stat.columbia.edu/~gelman/research/published/badbayesmain.pdf):
+
+>As Brad Efron wrote in 1986, Bayesian theory requires a great deal of thought about the given situation to apply sensibly, and **recommending that scientists use Bayes’ theorem is like giving the neighborhood kids the key to your F-16.**
+
+---
+
+Where are all these F-16s piloted by shotgun-wielding toddlers?

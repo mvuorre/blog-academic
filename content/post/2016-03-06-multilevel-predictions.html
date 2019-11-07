@@ -1,0 +1,344 @@
+---
+title: "Multilevel Confidence"
+author: "Matti Vuorre"
+date: 2016-03-06
+categories: ["statistics"]
+tags: ["R", "tutorial", "bayes", "brms"]
+description: "Average & individual-specific confidence limits for regression lines in a multilevel regression modeling context"
+---
+
+
+
+<p>In this post, I address the following problem: How to obtain regression lines and their associated <em>confidence intervals</em> at the average and individual-specific levels, in a two-level multilevel linear regression.</p>
+<div id="background" class="section level1">
+<h1>Background</h1>
+<p>Visualization is perhaps the most effective way of communicating the results of a statistical model. For regression models, two figures are commonly used: The coefficient plot shows the coefficients of a model graphically, and can be used to replace or augment a model summary table. The advantage over tables is that it is usually faster to understand the estimated parameters by looking at them in graphical form, but the downside is losing the numerical accuracy of the table. However, both of these model summaries become increasingly difficult to interpret as the number of coefficients increases, and especially when interaction terms are included.</p>
+<p>An alternative visualization is the line plot, which shows what the model implies in terms of the data, such as the relationship between X and Y, and perhaps how that relationship is moderated by other variables. For a linear regression, this plot displays the regression line and its confidence interval. If a confidence interval is not shown, the plot is not complete because the viewer can’t visually assess the uncertainty in the regression line, and therefore a simple line without a confidence interval is of little inferential value. Obtaining the line and confidence interval for simple linear regression is very easy, but is not straightforward in a multilevel context, the topic of this post.</p>
+<p>Most of my statistical analyses utilize multilevel modeling, where parameters (means, slopes) are treated as varying between individuals. Because common procedures for estimating these models return point estimates for the regression coefficients at all levels, drawing expected regression lines is easy. However, displaying the confidence limits for the regression lines is not as easily done. Various options exist, and some software packages provide these limits automatically, but in this post I want to highlight a completely general approach to obtaining and drawing confidence limits for regression lines at multiple levels of analysis, and where applicable, show how various packages deliver them automatically. The general approach relies on random samples of plausible parameter values, which can then be visualized as random samples of regression lines (for example, Kruschke, 2014, uses this approach effectively). Importantly, we can summarize the samples with an interval at each level of the predictor values, yielding the confidence interval for the regression line.</p>
+<p>I will illustrate the procedure first with a maximum likelihood model fitting procedure, using the <strong>lme4</strong> package. This procedure requires an additional step where plausible parameter values are simulated from the estimated model, using the <strong>arm</strong> package. Then, I’ll show how to obtain the limits from models estimated with Bayesian methods, using various R packages relying on the Stan inference engine (only <strong>brms</strong> is included at the moment).</p>
+</div>
+<div id="the-data" class="section level1">
+<h1>The Data</h1>
+<p>I will use the <em>sleepstudy</em> data set from the <code>lme4</code> package as an example:</p>
+<blockquote>
+<p>“The average reaction time per day for subjects in a sleep deprivation study. On day 0 the subjects had their normal amount of sleep. Starting that night they were restricted to 3 hours of sleep per night. The observations represent the average reaction time on a series of tests given each day to each subject.”</p>
+</blockquote>
+<p>The <code>sleepstudy</code> object is a <code>data.frame</code>, which I modify a little bit before getting started:</p>
+<ul>
+<li>Change the object from a <code>data.frame</code> to a <code>data_frame</code>, because the latter has better default behavior</li>
+<li>Create a sequential id number for each individual</li>
+<li>Reorder the variables to a logical order (id, predictor, outcome)</li>
+<li>Include a subset of 16 individuals.</li>
+</ul>
+<pre class="r"><code>sleepstudy &lt;- as_tibble(sleepstudy) %&gt;%
+    mutate(id = rep(1:18, each = 10)) %&gt;%
+    dplyr::select(id, Subject, Days, Reaction) %&gt;%
+    filter(id &lt;= 16)</code></pre>
+<p>The data is structured in a long format, where each row contains all variables at a single measurement instance:</p>
+<pre><code># # A tibble: 160 x 4
+#       id Subject  Days Reaction
+#    &lt;int&gt; &lt;fct&gt;   &lt;dbl&gt;    &lt;dbl&gt;
+#  1     1 308         0     250.
+#  2     1 308         1     259.
+#  3     1 308         2     251.
+#  4     1 308         3     321.
+#  5     1 308         4     357.
+#  6     1 308         5     415.
+#  7     1 308         6     382.
+#  8     1 308         7     290.
+#  9     1 308         8     431.
+# 10     1 308         9     466.
+# # ... with 150 more rows</code></pre>
+</div>
+<div id="fixed-effects-models-and-cis" class="section level1">
+<h1>Fixed Effects Models and CIs</h1>
+<p>Below, I show two kinds of scatterplots from the data. The left one represents a fixed effects regression, where information about individuals is discarded, and all that is left is a lonely band of inference in a sea of scattered observations. The right panel shows fixed effects regressions separately for each individual.</p>
+<pre class="r"><code>p1 &lt;- ggplot(sleepstudy, aes(x = Days, y = Reaction)) +
+    geom_point(shape = 1) +
+    geom_smooth(method = &quot;lm&quot;, fill = &quot;dodgerblue&quot;, level = .95) +
+    scale_x_continuous(breaks = c(0, 3, 6, 9)) +
+    coord_cartesian(ylim = c(180, 500))
+p2 &lt;- p1 + facet_wrap(~id, nrow = 4)
+grid.arrange(p1, p2, ncol = 2)</code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/fig1and2-1.png" width="864" style="display: block; margin: auto;" /></p>
+<p>Obtaining confidence intervals for regression lines using <strong>ggplot2</strong> is easy, but an alternative way is to explicitly use the <code>predict()</code> function (which <strong>ggplot2</strong> uses under the hood). For more complicated or esoteric models, explicit prediction becomes necessary, either using <code>predict()</code> or custom code.</p>
+</div>
+<div id="multilevel-model" class="section level1">
+<h1>Multilevel model</h1>
+<p>The multilevel model I’ll fit to these data treats the intercept and effect of days as fixed and varying between individuals</p>
+<p><span class="math display">\[\mathsf{reaction}_{ij} \sim \mathcal{N}(\mu_{ij}, \sigma)\]</span></p>
+<p><span class="math display">\[\mu_{ij} = \beta_{0j} + \beta_{1j} \  \mathsf{days}_{ij}\]</span></p>
+<p><span class="math display">\[\begin{pmatrix}{\beta_{0j}}\\{\beta_{1j}}\end{pmatrix} \sim 
+\mathcal{N} \begin{pmatrix}{\gamma_{00}},\ {\tau_{00}}\ {\rho_{01}}\\
+{\gamma_{10}},\ {\rho_{01}}\ {\tau_{10}} \end{pmatrix}\]</span></p>
+<p>In this post, and the above equations, I’ll omit the discussion of hyperpriors (priors on <span class="math inline">\(\gamma\)</span>, <span class="math inline">\(\tau\)</span> and <span class="math inline">\(\rho\)</span> parameters.)</p>
+<p>If the above equation baffles the mind, or multilevel models are mysterious to you, Bolger and Laurenceau (2013) provide a great introduction, and a comprehensive treatment is given in Gelman and Hill (2007).</p>
+</div>
+<div id="maximum-likelihood-estimation-lme4" class="section level1">
+<h1>Maximum likelihood estimation: <strong>lme4</strong></h1>
+<p>I’ll estimate the multilevel model using the <strong>lme4</strong> package.</p>
+<pre class="r"><code>lmerfit &lt;- lmer(Reaction ~ Days + (Days | id), data = sleepstudy)</code></pre>
+<table>
+<caption>(#tab:fit_lmer)Multilevel model summary</caption>
+<thead>
+<tr class="header">
+<th align="left">term</th>
+<th align="right">estimate</th>
+<th align="right">std.error</th>
+<th align="left">group</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">(Intercept)</td>
+<td align="right">250.29</td>
+<td align="right">7.63</td>
+<td align="left">fixed</td>
+</tr>
+<tr class="even">
+<td align="left">Days</td>
+<td align="right">10.50</td>
+<td align="right">1.74</td>
+<td align="left">fixed</td>
+</tr>
+<tr class="odd">
+<td align="left">sd_(Intercept).id</td>
+<td align="right">26.34</td>
+<td align="right">NA</td>
+<td align="left">id</td>
+</tr>
+<tr class="even">
+<td align="left">sd_Days.id</td>
+<td align="right">6.34</td>
+<td align="right">NA</td>
+<td align="left">id</td>
+</tr>
+<tr class="odd">
+<td align="left">cor_(Intercept).Days.id</td>
+<td align="right">0.04</td>
+<td align="right">NA</td>
+<td align="left">id</td>
+</tr>
+<tr class="even">
+<td align="left">sd_Observation.Residual</td>
+<td align="right">26.26</td>
+<td align="right">NA</td>
+<td align="left">Residual</td>
+</tr>
+</tbody>
+</table>
+<p>The key points here are the estimates and their associated standard errors, the latter of which are missing for the varying effects’ correlations and standard deviations.</p>
+<div id="working-with-point-estimates" class="section level2">
+<h2>Working with point estimates</h2>
+<p>Using the model output, we can generate regression lines using the <code>predict()</code> function. Using this method, we can simply add a new column to the existing <code>sleepstudy</code> data frame, giving the fitted value for each row in the data. However, for visualization, it is very useful to generate the fitted values for specific combinations of predictor values, instead of generating a fitted value for every observation. To do this, I simply create dataframes with the relevant predictors, and feed these data frames as data to <code>predict()</code>.</p>
+<p>To get fitted values at the average level, when there is only one predictor, the data frame is simply a column with rows for each level of <code>days</code>. For the varying effects, I create a data frame where each individual has all levels of <code>days</code>, using the <code>expand.grid()</code> function. When there are many predictors, <code>expand.grid()</code> is your friend.</p>
+<pre class="r"><code># Data frame to evaluate average effects predictions on
+newavg &lt;- data.frame(Days = 0:9)
+newavg$Reaction &lt;- predict(lmerfit, re.form = NA, newavg)
+# Predictors for the varying effect&#39;s predictions
+newvary &lt;- expand.grid(Days = 0:9, id = 1:16)
+newvary$Reaction &lt;- predict(lmerfit, newvary)</code></pre>
+<p>I’ll show these predictions within the previous figures: On the left, a single fixed effects model versus the average regression line from the new multilevel model, and on the right the separate fixed effects models versus the varying regression lines from the multilevel model. Below, I use blue colors to indicate the fixed effects models’ predictions, and black for the multilevel model’s predictions.</p>
+<pre class="r"><code>grid.arrange(
+    p1 + geom_line(data = newavg, col = &quot;black&quot;, size = 1),
+    p2 + geom_line(data = newvary, col = &quot;black&quot;, size = 1),
+    ncol = 2)</code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/plot_lmer-1.png" width="864" style="display: block; margin: auto;" /></p>
+<p>As you can probably tell, the fixed effects regression line (blue), and the multilevel model’s average regression line (black; left panel) are identical, because of the completely balanced design. However, interesting differences are apparent in the right panel: The varying effects’ regression lines are different from the separate fixed effects models’ regression lines. How? They are “shrunk” toward the average-level estimate. Focus on the 9th panel, an individual whose reaction times got faster with increased sleep deprivation:</p>
+<pre class="r"><code>p2 %+% filter(sleepstudy, id == 9) + 
+    geom_line(data = filter(newvary, id == 9), col = &quot;black&quot;, size = 1) +
+    ggtitle(&quot;ID 9&quot;)</code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/plot_lmer_id9-1.png" width="432" style="display: block; margin: auto;" /></p>
+<p>Estimating each participant’s data in their very own model (separate fixed effects models; isn’t that nice, a unique model for everyone!) resulted in a predicted line suggesting to us that this person’s cognitive performance is enhanced following sleep deprivation:</p>
+<table>
+<caption>(#tab:print_lm_id9)Fixed effect regression for ID 9</caption>
+<thead>
+<tr class="header">
+<th align="left">term</th>
+<th align="right">estimate</th>
+<th align="right">std.error</th>
+<th align="right">statistic</th>
+<th align="right">p.value</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">(Intercept)</td>
+<td align="right">263.035</td>
+<td align="right">6.694</td>
+<td align="right">39.296</td>
+<td align="right">0.000</td>
+</tr>
+<tr class="even">
+<td align="left">Days</td>
+<td align="right">-2.881</td>
+<td align="right">1.254</td>
+<td align="right">-2.298</td>
+<td align="right">0.051</td>
+</tr>
+</tbody>
+</table>
+<p>However, if we used a model where this individual was treated as a random draw from a population of individuals (the multilevel model; black line in the above figure), the story is different. The point estimate for the slope parameter, for this specific individual, from this model (-0.4232) tells us that the estimated decrease in reaction times is quite a bit smaller. But this is just a point estimate, and in order to draw inference, we’ll need standard errors, or some representation of the uncertainty, in the estimated parameters. The appropriate uncertainty representations will also allow us to draw the black lines with their associated confidence intervals. I’ll begin by obtaining a confidence interval for the average regression line.</p>
+</div>
+<div id="cis-using-arm-average-level" class="section level2">
+<h2>CIs using <strong>arm</strong>: Average level</h2>
+<p>The method I will illustrate in this post relies on random samples of plausible parameter values, from which we can then generate regression lines–or draw inferences about the parameters themselves. These regression lines can then be used as their own distribution with their own respective summaries, such as an X% interval. First, I’ll show a quick way for obtaining these samples for the <strong>lme4</strong> model, using the <strong>arm</strong> package to generate simulated parameter values.</p>
+<p>The important parts of this code are:</p>
+<ol style="list-style-type: decimal">
+<li>Simulating plausible parameter values</li>
+<li>Saving the simulated samples (a faux posterior distribution) in a data frame</li>
+<li>Creating a predictor matrix</li>
+<li>Creating a matrix for the fitted values</li>
+<li>Calculating fitted values for each combination of the predictor values, for each plausible combination of the parameter values</li>
+<li>Calculating the desired quantiles of the fitted values</li>
+</ol>
+<pre class="r"><code>sims &lt;- sim(lmerfit, n.sims = 1000)  # 1
+fs &lt;- fixef(sims)  # 2
+newavg &lt;- data.frame(Days = 0:9)
+Xmat &lt;- model.matrix( ~ 1 + Days, data = newavg)  # 3
+fitmat &lt;- matrix(ncol = nrow(fs), nrow = nrow(newavg))  # 4
+for (i in 1:nrow(fs)) { fitmat[,i] &lt;- Xmat %*% as.matrix(fs)[i,] }  # 5
+newavg$lower &lt;- apply(fitmat, 1, quantile, prob=0.05)  # 6
+newavg$median &lt;- apply(fitmat, 1, quantile, prob=0.5)  # 6
+newavg$upper &lt;- apply(fitmat, 1, quantile, prob=0.95)  # 6
+p1 + geom_line(data = newavg, aes(y = median), size = 1) +
+    geom_line(data = newavg, aes(y = lower), lty = 2) +
+    geom_line(data = newavg, aes(y = upper), lty = 2)</code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/sim_lmer-1.png" width="432" style="display: block; margin: auto;" /></p>
+<p>Again, the average regression line and the fixed effect model’s regression line are identical, but the former has a wider confidence interval (black dashed lines.)</p>
+<p class="well">
+Note. The above code snippet generalizes well to be used with any two matrices where one contains predictor values (the combinations of predictor values on which you want to predict) and the other samples of parameter values, such as a posterior distribution from a Bayesian model, as we’ll see below.
+<br>
+This procedure is given in Korner-Nievergelt et al. (2015), who give a detailed explanation of the code and on drawing inference from the results.
+</p>
+</div>
+<div id="cis-using-arm-individual-level" class="section level2">
+<h2>CIs using <strong>arm</strong>: Individual level</h2>
+<p>The <code>fitted()</code> function in <strong>arm</strong> returns fitted values at the varying effects level automatically, so we can skip a few lines of code from above to obtain confidence intervals at the individual-level:</p>
+<pre class="r"><code>yhat &lt;- fitted(sims, lmerfit)
+sleepstudy$lower &lt;- apply(yhat, 1, quantile, prob=0.025)
+sleepstudy$median &lt;- apply(yhat, 1, quantile, prob=0.5)
+sleepstudy$upper &lt;- apply(yhat, 1, quantile, prob=0.975)
+p2 + geom_line(data = sleepstudy, aes(y = median), size = 1) +
+    geom_line(data = sleepstudy, aes(y = lower), lty = 2) +
+    geom_line(data = sleepstudy, aes(y = upper), lty = 2) </code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/plot_lmer_vary-1.png" width="864" style="display: block; margin: auto;" /></p>
+<p>A subset of individuals highlights the most interesting differences between the models:</p>
+<pre class="r"><code>tmp &lt;- filter(sleepstudy, id %in% c(6, 9))
+p2 %+% tmp +
+    geom_line(data = tmp, aes(y = median), size = 1) +
+    geom_line(data = tmp, aes(y = lower), lty = 2) +
+    geom_line(data = tmp, aes(y = upper), lty = 2) </code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/plot_lmer_vary_id9-1.png" width="432" style="display: block; margin: auto;" /></p>
+<p>In the top panel, the unique fixed effects model’s confidence band is much wider than the confidence band from the multilevel model, highlighting the pooling of information in the latter model. Similarly, the bottom panel (individual 9 discussed above) shows that 95% plausible regression lines for that individual now include lines that increase as a function of days of sleep deprivation, and indeed the expected regression line for this individual is nearly a flat line.</p>
+<p>In the next sections, we’ll apply this method of obtaining regression line confidence intervals for multilevel models estimated with Bayesian methods.</p>
+</div>
+</div>
+<div id="intervals-from-bayesian-models" class="section level1">
+<h1>Intervals from Bayesian models</h1>
+<p>Confidence intervals are commonly called <strong>credible intervals</strong> in the Bayesian context, but I’ll use these terms interchangeably. The reader should be aware that, unlike traditional confidence intervals, credible intervals actually allow statements about credibility. In fact, being allowed to say the things we usually mean when discussing confidence intervals is one of many good reasons for applying bayesian statistics.</p>
+<div id="brms" class="section level2">
+<h2><strong>brms</strong></h2>
+<p>I use <strong>brms</strong> to specify the model and sample from the posterior distribution (<strong>brms</strong> uses <strong>Stan</strong> under the hood.)</p>
+<pre class="r"><code>library(brms)
+options(mc.cores = parallel::detectCores())  # Run many chains simultaneously
+brmfit &lt;- brm(
+    data = sleepstudy, 
+    Reaction ~ Days + (Days | Subject), 
+    family = gaussian,
+    iter = 2000,
+    chains = 4,
+    file = here::here(&quot;static/data/sleepstudymodel&quot;))</code></pre>
+<table>
+<caption>(#tab:print_brmfit)Bayesian model estimates (brms)</caption>
+<thead>
+<tr class="header">
+<th></th>
+<th align="right">Estimate</th>
+<th align="right">Est.Error</th>
+<th align="right">l-95% CI</th>
+<th align="right">u-95% CI</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Intercept</td>
+<td align="right">249.73</td>
+<td align="right">8.09</td>
+<td align="right">234.02</td>
+<td align="right">265.72</td>
+</tr>
+<tr class="even">
+<td>Days</td>
+<td align="right">10.47</td>
+<td align="right">1.91</td>
+<td align="right">6.63</td>
+<td align="right">14.17</td>
+</tr>
+</tbody>
+</table>
+<p>Note that now we also have values for the uncertainties associated with the varying effect parameters. Brilliant!</p>
+<div id="average-regression-line-ci" class="section level3">
+<h3>Average regression line &amp; CI</h3>
+<p><strong>brms</strong> has a function for obtaining fitted values (<code>fitted()</code>) and their associated upper and lower bounds, which together constitute the regression line and its confidence interval.</p>
+<pre class="r"><code>newavg &lt;- data.frame(Days = 0:9)
+fitavg &lt;- cbind(newavg, fitted(brmfit, newdata = newavg, re_formula = NA)[,-2])
+names(fitavg) &lt;- c(&quot;Days&quot;, &quot;Reaction&quot;, &quot;lower&quot;, &quot;upper&quot;)
+p3 &lt;- p1 + 
+    geom_line(data = fitavg, col = &quot;black&quot;, size = 1) +
+    geom_line(data = fitavg, aes(y = lower), col = &quot;black&quot;, lty = 2) +
+    geom_line(data = fitavg, aes(y = upper), col = &quot;black&quot;, lty = 2)
+p3</code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/plot_brm_avg-1.png" width="432" style="display: block; margin: auto;" /></p>
+<p>The average effects’ estimates in this model have higher uncertainty than in the <code>lmerfit</code> model above, explaining why the average regression line’s CI is also wider.</p>
+<div id="alternative-to-cis" class="section level4">
+<h4>Alternative to CIs</h4>
+<p>Instead of showing summaries of the samples from the posterior distribution, one could also plot the entire distribution–at the risk of overplotting. Overplotting can be avoided by adjusting each regression line’s transparency with the <code>alpha</code> parameter, resulting in a visually attractive–maybe?–display of the uncertainty in the regression line:</p>
+<pre class="r"><code>pst &lt;- posterior_samples(brmfit, &quot;b&quot;)
+ggplot(sleepstudy, aes(x = Days, y = Reaction)) +
+    geom_point(shape = 1) +
+    geom_abline(data = pst, alpha = .01, size = .4,
+                aes(intercept = b_Intercept, slope = b_Days))</code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/unnamed-chunk-1-1.png" width="864" style="display: block; margin: auto;" /></p>
+</div>
+</div>
+<div id="varying-regression-lines-cis" class="section level3">
+<h3>Varying regression lines &amp; CIs</h3>
+<p>The best part is, <strong>brms</strong>’ <code>fitted()</code> also gives regression lines with CIs at the individual level.</p>
+<pre class="r"><code>X &lt;- cbind(sleepstudy[,1:3], fitted(brmfit)[,-2])
+names(X) &lt;- c(&quot;id&quot;, &quot;Subject&quot;, &quot;Days&quot;, &quot;Reaction&quot;, &quot;lower&quot;, &quot;upper&quot;)
+p2 + geom_line(data = X, aes(y = Reaction), size = 1) +
+    geom_line(data = X, aes(y = lower), lty = 2) +
+    geom_line(data = X, aes(y = upper), lty = 2)</code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/plot_brm_vary-1.png" width="864" style="display: block; margin: auto;" /></p>
+<p>Working with <strong>brms</strong> makes it very easy to obtain CIs for regression lines at both levels of analysis.</p>
+</div>
+</div>
+<div id="an-alternative-visualization" class="section level2">
+<h2>An alternative visualization</h2>
+<p>It might be useful, especially for model checking purposes, to display not only the fitted values, but also what the model predicts. To display the 95% prediction interval, I use the same procedure, but replace <code>fitted()</code> with <code>predict()</code>:</p>
+<pre class="r"><code>newavg &lt;- data.frame(Days = 0:9)
+predavg &lt;- cbind(newavg, predict(brmfit, newdata = newavg, re_formula = NA)[,-2])
+names(predavg) &lt;- c(&quot;Days&quot;, &quot;Reaction&quot;, &quot;lower&quot;, &quot;upper&quot;)
+p3 + geom_ribbon(data = predavg, aes(ymin = lower, ymax = upper), 
+                 col = NA, alpha = .2)</code></pre>
+<p><img src="/post/2016-03-06-multilevel-predictions_files/figure-html/unnamed-chunk-2-1.png" width="864" style="display: block; margin: auto;" /></p>
+</div>
+</div>
+<div id="conclusion" class="section level1">
+<h1>Conclusion</h1>
+<p>Working with a matrix of plausible parameter values–a posterior distribution–makes it easier to draw regression lines with confidence intervals. Specifically, the <strong>brms</strong> package provides easy access to CIs in a multilevel modeling context. For more complex models, one can calculate the fitted values using a matrix of predictors, and a matrix of plausible parameter values.</p>
+</div>
+<div id="further-reading" class="section level1">
+<h1>Further Reading</h1>
+<p>Bates, D., Mächler, M., Bolker, B., &amp; Walker, S. (2015). Fitting Linear Mixed-Effects Models Using lme4. Journal of Statistical Software, 67(1), 1–48. <a href="http://doi.org/10.18637/jss.v067.i01" class="uri">http://doi.org/10.18637/jss.v067.i01</a></p>
+<p>Belenky, G., Wesensten, N. J., Thorne, D. R., Thomas, M. L., Sing, H. C., Redmond, D. P., … Balkin, T. J. (2003). Patterns of performance degradation and restoration during sleep restriction and subsequent recovery: A sleep dose-response study. Journal of Sleep Research, 12(1), 1–12.</p>
+<p>Bolger, N., &amp; Laurenceau, J.-P. (2013). Intensive Longitudinal Methods: An Introduction to Diary and Experience Sampling Research. Guilford Press.</p>
+<p>Buerkner, P.-C. (2016). brms: Bayesian Regression Models using Stan. Retrieved from <a href="http://CRAN.R-project.org/package=brms" class="uri">http://CRAN.R-project.org/package=brms</a></p>
+<p>Gelman, A., &amp; Hill, J. (2007). Data Analysis Using Regression and Multilevel/Hierarchical Models. Cambridge University Press.</p>
+<p>Gelman, A., &amp; Su, Y.-S. (2015). arm: Data Analysis Using Regression and Multilevel/Hierarchical Models. Retrieved from <a href="http://CRAN.R-project.org/package=arm" class="uri">http://CRAN.R-project.org/package=arm</a></p>
+<p>Korner-Nievergelt, F., Roth, T., Felten, S. von, Guélat, J., Almasi, B., &amp; Korner-Nievergelt, P. (2015). Bayesian Data Analysis in Ecology Using Linear Models with R, BUGS, and Stan: Including Comparisons to Frequentist Statistics. Academic Press.</p>
+<p>Kruschke, J. K. (2014). Doing Bayesian Data Analysis: A Tutorial Introduction with R (2nd Edition). Burlington, MA: Academic Press.</p>
+<p>Wickham, H. (2009). ggplot2: Elegant Graphics for Data Analysis. Springer Science &amp; Business Media.</p>
+<p><a href="https://gist.github.com/tmalsburg/df66e6c2ab494fad83ee">Predict vs. simulate in lme4</a></p>
+</div>

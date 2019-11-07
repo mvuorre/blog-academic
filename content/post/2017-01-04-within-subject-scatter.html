@@ -1,0 +1,259 @@
+---
+author: Matti Vuorre
+categories: ["statistics"]
+date: 2017-01-04
+draft: false
+tags: ["data visualization", "R" ,"tutorial", "psychology"]
+title: "How to create within-subject scatter plots in R with ggplot2"
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 2
+summary: "Today, we'll take a look at creating a specific type of visualization for data from a within-subjects experiment. You'll often see within-subject data visualized as bar graphs (condition means, and maybe mean difference if you're lucky.) But alternatives exist, and today we'll take a look at within-subjects scatterplots."
+---
+
+
+<div id="TOC">
+<ul>
+<li><a href="#subject-means">Subject means</a><ul>
+<li><a href="#bar-graph">Bar graph</a></li>
+<li><a href="#within-subject-scatterplot">Within-subject scatterplot</a></li>
+</ul></li>
+<li><a href="#within-subject-scatterplot-with-ses">Within-subject scatterplot with SEs</a></li>
+<li><a href="#endnote">Endnote</a></li>
+<li><a href="#references">References</a></li>
+</ul>
+</div>
+
+<p>Today, we’ll take a look at creating a specific type of visualization for data from a within-subjects experiment (also known as repeated measures, but that can sometimes be a misleading label). You’ll often see within-subject data visualized as bar graphs (condition means, and maybe mean difference if you’re lucky.) But alternatives exist, and today we’ll take a look at <strong>within-subjects scatterplots</strong>.</p>
+<p>For example, <a href="http://openpsychologydata.metajnl.com/articles/10.5334/jopd.ai/">Ganis and Kievit</a> (2015) asked 54 people to observe, on each trial, two 3-D shapes with various rotations and judge whether the two shapes were the same or not.</p>
+<p>There were 4 angles (0, 50, 100, and 150 degree rotations), but for simplicity, today we’ll only look at items that were not rotated with respect to each other, and items rotated 50 degrees. The data are freely available (thanks!!) in Excel format, but to make them more easily available for readers, I’ve uploaded them in a .csv file, which we can load directly from an R script.</p>
+<pre class="r"><code>d &lt;- read_csv(&quot;https://mvuorre.github.io/data/ganis-kievit-2015.csv&quot;)</code></pre>
+<p>First, let’s clean the data a little bit by selecting and renaming a subset of the variables, and then take only the trials with 0 or 50 degrees rotation.</p>
+<pre class="r"><code>d &lt;- transmute(
+    d,
+    id = Subject,
+    angle = angle,
+    correct = correct.incorrect,
+    rt = Time
+    ) %&gt;%
+    filter(angle &lt; 51)
+    d</code></pre>
+<pre><code>## # A tibble: 2,592 x 4
+##       id angle correct    rt
+##    &lt;dbl&gt; &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;
+##  1     1     0       1  1355
+##  2     1    50       1  1685
+##  3     1    50       1  1237
+##  4     1     0       1  1275
+##  5     1    50       1  2238
+##  6     1     0       1  1524
+##  7     1     0       1   964
+##  8     1    50       1  1226
+##  9     1    50       1  2548
+## 10     1    50       1  1588
+## # ... with 2,582 more rows</code></pre>
+<p>We’ll focus on comparing the reaction times between the 0 degree and 50 degree rotation trials. We predict that people will take longer to respond when the items are rotated, and that this effect will be robust across people.</p>
+<div id="subject-means" class="section level1">
+<h1>Subject means</h1>
+<div id="bar-graph" class="section level2">
+<h2>Bar graph</h2>
+<p>For the first graph, we’ll only need the subject’s means in each condition.</p>
+<pre class="r"><code>subject_means &lt;- group_by(d, id, angle) %&gt;%
+    summarize(rt = mean(rt, na.rm = T))
+subject_means</code></pre>
+<pre><code>## # A tibble: 108 x 3
+## # Groups:   id [?]
+##       id angle    rt
+##    &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+##  1     1     0 1512.
+##  2     1    50 2039.
+##  3     2     0 1251.
+##  4     2    50 1768.
+##  5     3     0 1602 
+##  6     3    50 1862.
+##  7     4     0 1501.
+##  8     4    50 2023.
+##  9     5     0 2170.
+## 10     5    50 2512.
+## # ... with 98 more rows</code></pre>
+<p>The first plot is a simple bar graph showing the condition means, and every subject as a point. Note that the mean is visualized as a bar, using the <code>stat_summary(geom="bar")</code> function.</p>
+<pre class="r"><code>barplot &lt;- ggplot(subject_means, aes(x = angle, y = rt)) +
+    stat_summary(
+    geom = &quot;bar&quot;,
+    fun.y = &quot;mean&quot;,
+    col = &quot;black&quot;,
+    fill = &quot;gray70&quot;
+    ) +
+    geom_point(position = position_jitter(h = 0, w = 5)) +
+    scale_y_continuous(limits = c(0, max(d$rt, na.rm = T)),
+    expand = c(0, 0))
+    barplot</code></pre>
+<p><img src="/post/2017-01-04-within-subject-scatter_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>This figure shows quite clearly that the mean reaction time in the 50 degree angle condition was higher than in the 0 degree angle condition, and the spread across individuals in each condition. However, we often are specifically interested in the <em>within-subject effect</em> of condition, which would be difficult to visually display in this image. We could draw lines to connect each point, and the effect would then be visible as a “spaghetti plot”, but while useful, these plots may sometimes be a little overwhelming especially if there’s too many people (spaghetti is great but nobody likes too much of it!)</p>
+</div>
+<div id="within-subject-scatterplot" class="section level2">
+<h2>Within-subject scatterplot</h2>
+<p>To draw a within-subjects scatterplot, we’ll need a slight reorganization of the data, such that it is in wide format with respect to the conditions:</p>
+<pre class="r"><code>subject_means</code></pre>
+<pre><code>## # A tibble: 108 x 3
+## # Groups:   id [54]
+##       id angle    rt
+##    &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+##  1     1     0 1512.
+##  2     1    50 2039.
+##  3     2     0 1251.
+##  4     2    50 1768.
+##  5     3     0 1602 
+##  6     3    50 1862.
+##  7     4     0 1501.
+##  8     4    50 2023.
+##  9     5     0 2170.
+## 10     5    50 2512.
+## # ... with 98 more rows</code></pre>
+<pre class="r"><code>subject_means_wide &lt;-
+    spread(subject_means,
+           key = angle,
+           value = rt,
+           sep = &quot;_&quot;)
+subject_means_wide</code></pre>
+<pre><code>## # A tibble: 54 x 3
+## # Groups:   id [54]
+##       id angle_0 angle_50
+##    &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt;
+##  1     1   1512.    2039.
+##  2     2   1251.    1768.
+##  3     3   1602     1862.
+##  4     4   1501.    2023.
+##  5     5   2170.    2512.
+##  6     6   1302.    1382.
+##  7     7   2212.    3014.
+##  8     8   1452.    1824.
+##  9     9   2012.    2501 
+## 10    10   1939.    3058.
+## # ... with 44 more rows</code></pre>
+<p>Then we can simply map the per-subject angle-means to the X and Y axes:</p>
+<pre class="r"><code>ggplot(subject_means_wide, aes(x = angle_0, y = angle_50)) +
+    geom_point()</code></pre>
+<p><img src="/post/2017-01-04-within-subject-scatter_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>But this graph needs a couple of fixes to be maximally informative. We need to:</p>
+<ul>
+<li>Make the aspect ratio 1</li>
+<li>Force the axes to be identically scaled (note the use of <code>min()</code> and <code>max()</code> to show the plots on the scale of the data)</li>
+<li>Add an identity (diagonal) line</li>
+<li>Modify the axis labels</li>
+</ul>
+<pre class="r"><code>lims &lt;- c(min(d$rt, na.rm = T), max(d$rt, na.rm = T))
+wsplot &lt;-
+    ggplot(subject_means_wide, aes(x = angle_0, y = angle_50)) +
+    geom_point() +
+    geom_abline() +
+    scale_x_continuous(&quot;0 degrees&quot;, limits = lims) +
+    scale_y_continuous(&quot;50 degrees&quot;, limits = lims) +
+    theme(aspect.ratio = 1)
+wsplot</code></pre>
+<p><img src="/post/2017-01-04-within-subject-scatter_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>Great! This plot shows each person (mean) as a point, and the difference between conditions can be directly seen by how far from the diagonal line the points are. Points above the diagonal indicate that the person’s (mean) RT was greater in the 50 degrees condition. <em>All</em> of the points lie below the identity line, indicating that the effect was as we predicted, and robust across individuals.</p>
+<p>This is a very useful diagnostic plot that simultaneously shows the population- (or group-) level trend (are the points, on average, below or above the identity line?) and the expectation (mean) for every person (roughly, how far apart the points are from each other?). The points are naturally connected by their location, unlike in a bar graph where they would be connected by lines. Maybe you think it’s an informative graph; it’s certainly very easy to do in R with ggplot2. Also, I think it is visually very convincing, and doesn’t necessarily lead one to focus unjustly just on the group means: I am both convinced and informed by the graph.</p>
+</div>
+</div>
+<div id="within-subject-scatterplot-with-ses" class="section level1">
+<h1>Within-subject scatterplot with SEs</h1>
+<p>Well, we didn’t measure everybody repeatedly for nothing. We know more than their means; we can use the spread of the individual level scores to calculate, say, a SE for everybody and add it to the graph.</p>
+<pre class="r"><code>subject_summaries &lt;- group_by(d, id, angle) %&gt;%
+    summarize(mean = mean(rt, na.rm = T),
+              se = sd(rt, na.rm = T) / sqrt(n()))
+subject_summaries</code></pre>
+<pre><code>## # A tibble: 108 x 4
+## # Groups:   id [?]
+##       id angle  mean    se
+##    &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+##  1     1     0 1512.  146.
+##  2     1    50 2039.  134.
+##  3     2     0 1251.  125.
+##  4     2    50 1768.  211.
+##  5     3     0 1602   162.
+##  6     3    50 1862.  109.
+##  7     4     0 1501.  112.
+##  8     4    50 2023.  172.
+##  9     5     0 2170.  242.
+## 10     5    50 2512.  307.
+## # ... with 98 more rows</code></pre>
+<p>Now we simply need to reformat the data to wide with respect to both the means and SEs. The trick here is to use <code>spread()</code> with different values for the <code>sep()</code> (separate) argument. Then, when the means and SEs are joined into wide format, we can select the columns containing either the means or SEs by referring to their unique names</p>
+<pre class="r"><code>means &lt;- select(subject_summaries, -se) %&gt;%
+    spread(key=angle, value=mean, sep = &quot;_&quot;)
+means</code></pre>
+<pre><code>## # A tibble: 54 x 3
+## # Groups:   id [54]
+##       id angle_0 angle_50
+##    &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt;
+##  1     1   1512.    2039.
+##  2     2   1251.    1768.
+##  3     3   1602     1862.
+##  4     4   1501.    2023.
+##  5     5   2170.    2512.
+##  6     6   1302.    1382.
+##  7     7   2212.    3014.
+##  8     8   1452.    1824.
+##  9     9   2012.    2501 
+## 10    10   1939.    3058.
+## # ... with 44 more rows</code></pre>
+<pre class="r"><code>ses &lt;- select(subject_summaries, -mean) %&gt;%
+    spread(key=angle, value=se, sep = &quot;SE&quot;)
+ses</code></pre>
+<pre><code>## # A tibble: 54 x 3
+## # Groups:   id [54]
+##       id angleSE0 angleSE50
+##    &lt;dbl&gt;    &lt;dbl&gt;     &lt;dbl&gt;
+##  1     1    146.      134. 
+##  2     2    125.      211. 
+##  3     3    162.      109. 
+##  4     4    112.      172. 
+##  5     5    242.      307. 
+##  6     6     99.7      72.5
+##  7     7    223.      240. 
+##  8     8    110.      197. 
+##  9     9    130.      203. 
+## 10    10    233.      276. 
+## # ... with 44 more rows</code></pre>
+<pre class="r"><code>sums &lt;- left_join(means, ses)
+sums </code></pre>
+<pre><code>## # A tibble: 54 x 5
+## # Groups:   id [?]
+##       id angle_0 angle_50 angleSE0 angleSE50
+##    &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;     &lt;dbl&gt;
+##  1     1   1512.    2039.    146.      134. 
+##  2     2   1251.    1768.    125.      211. 
+##  3     3   1602     1862.    162.      109. 
+##  4     4   1501.    2023.    112.      172. 
+##  5     5   2170.    2512.    242.      307. 
+##  6     6   1302.    1382.     99.7      72.5
+##  7     7   2212.    3014.    223.      240. 
+##  8     8   1452.    1824.    110.      197. 
+##  9     9   2012.    2501     130.      203. 
+## 10    10   1939.    3058.    233.      276. 
+## # ... with 44 more rows</code></pre>
+<p>The code for the plot is actually quite straightforward once the tricky part of data formatting is done (this is really the philosophy behind ggplot2). Use <code>errorbar()</code> to draw the vertical SE bars, and <code>errorbarh()</code> to draw the horizontal SE bars.</p>
+<pre class="r"><code>ggplot(sums, aes(x=angle_0, y=angle_50)) +
+    geom_point() +
+    geom_errorbar(aes(ymin=angle_50-angleSE50, ymax=angle_50+angleSE50)) +
+    geom_errorbarh(aes(xmin=angle_0-angleSE0, xmax=angle_0+angleSE0)) +
+    geom_abline() +
+    scale_x_continuous(&quot;0 degrees&quot;, limits = lims) +
+    scale_y_continuous(&quot;50 degrees&quot;, limits = lims) +
+    theme(aspect.ratio=1)</code></pre>
+<p><img src="/post/2017-01-04-within-subject-scatter_files/figure-html/unnamed-chunk-11-1.png" width="960" /></p>
+<p>Cool, huh? This graph shows the mean and +-1 SEM for everybody’s reaction time in the 0 degrees (x axis) and 50 degrees (y axis) conditions. This graph could be a great visual inspection of the data before fitting any complex models, and requires only some slight reorganizing of the data in R. Hope you’ll find it helpful in your own work!</p>
+</div>
+<div id="endnote" class="section level1">
+<h1>Endnote</h1>
+<p>Within-subject scatter plots are pretty common in some fields (psychophysics), but underutilized in many fiels where they might have a positive impact on statistical inference. Why not try them out on your own data, especially when they’re this easy to do with R and ggplot2?</p>
+<p>Recall that for real applications, it’s better to transform or model reaction times with a skewed distribution. Here we used normal distributions just for convenience.</p>
+<p>Finally, this post was made possible by the Ganis and Kievit (2015) who generously have shared their data online. Big thanks!</p>
+<p>Have a great day!</p>
+</div>
+<div id="references" class="section level1">
+<h1>References</h1>
+<p>Ganis, G., &amp; Kievit, R. (2015). A New Set of Three-Dimensional Shapes for Investigating Mental Rotation Processes: Validation Data and Stimulus Set. Journal of Open Psychology Data, 3(1). <a href="https://doi.org/10.5334/jopd.ai" class="uri">https://doi.org/10.5334/jopd.ai</a></p>
+</div>

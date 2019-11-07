@@ -1,0 +1,28 @@
+---
+author: Matti Vuorre
+categories:
+- psychology
+date: 2017-02-16
+draft: false
+tags:
+- consciousness
+- presentation
+title: Science of Consciousness Talks on YouTube
+---
+
+Last spring, at The Science of Consciousness conference in Tucson (previously known as Toward a Science of Consciousness), I was fortunate to be asked to participate in a discussion panel on Consciousness and Free Will. I only now found out that they have uploaded the videos from all the plenary talks and panels on YouTube. 
+
+The plenary talk before the panel was given by Aaron Schurger, on a computational model of the controversial results from Benjamin Libet's experiments (a really great talk about a very nice paper, I might add). The panel talks begin at about 40 minutes into the video below, and my talk, titled "5000 Years Without Free Will", begins at 1h35min. [Enjoy](https://youtu.be/GcSmbzqWX7Q):
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/GcSmbzqWX7Q" frameborder="0" allowfullscreen></iframe>
+
+(I, um, never realized how, um, often I say "um" when, um, giving talks--it's so distracting now that I'm trying to listen to the talk. It's good to see these videos afterwards to note those sorts of problems so I can fix them.)
+
+The 2016 TSC conference in Arizona had a *great* end-of-the-conference party, at which Baba Brinkman summed up the whole conference in a 15 or so minute rap performance. Needless to say, a rap performance about the science and philosophy of consciousness is pure gold. Check it out on [YouTube](https://youtu.be/uC4_SslVMXk):
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/uC4_SslVMXk" frameborder="0" allowfullscreen></iframe>
+
+(The bit about the Free Will and Consciousness panel is 9 minutes into the video.)
+
+If you ever get a chance to go to the [TSC conference](http://www.consciousness.arizona.edu/), I highly recommend it. It's a little pricey, but the times I've been it was definitely worth it. And the locations are great--this year it's in China.
+

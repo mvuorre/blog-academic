@@ -1,0 +1,188 @@
+---
+title: 'Quantitative literature review with R: Exploring Psychonomic Society Journals,
+  Part I'
+author: Matti Vuorre
+date: '2017-06-01'
+slug: quantitative-literature-review-with-r-part-i
+categories:
+  - data science
+tags:
+  - data visualization
+  - R
+  - tutorial
+  - dplyr
+  - ggplot2
+  - psychology
+  - psychonomic society
+draft: no
+output:
+  blogdown::html_page:
+    toc: true
+    number_sections: false
+    toc_depth: 2
+summary: "In this tutorial, I'll show how to use [R](https://www.r-project.org/) to quantitatively explore, analyze, and visualize a research literature, using [Psychonomic Society's](http://www.psychonomic.org/) publications"
+---
+
+
+<div id="TOC">
+<ul>
+<li><a href="#the-dataset">The dataset</a></li>
+<li><a href="#univariate-figures">Univariate figures</a><ul>
+<li><a href="#publication-years">Publication years</a></li>
+<li><a href="#citations">Citations</a></li>
+</ul></li>
+<li><a href="#bivariate-figures">Bivariate figures</a><ul>
+<li><a href="#publication-year-and-citations">Publication year and citations</a></li>
+<li><a href="#pages-and-citations">Pages and citations</a></li>
+</ul></li>
+<li><a href="#summary">Summary</a></li>
+</ul>
+</div>
+
+<p>Literature reviews, both casual and formal (or qualitative / quantitative), are an important part of research. In this tutorial, I’ll show how to use <a href="https://www.r-project.org/">R</a> to quantitatively explore, analyze, and visualize a research literature, using <a href="http://www.psychonomic.org/">Psychonomic Society’s</a> publications between 2005 and 2016.</p>
+<p>Commonly, literature reviews are rather informal; you read a review paper or 10, maybe suggested to you by experts in the field, and then delve deeper into the topics presented in those papers. A more formal version starts with a database search, where you try out various search terms, and collect a more exhaustive list of publications related to your research questions. Here, we are going to have a bit of fun and explore a large heterogeneous literature (kind of) quantitatively, focusing on data manipulation (not the bad kind!) and visualization.</p>
+<div id="the-dataset" class="section level1">
+<h1>The dataset</h1>
+<p>I’ll be using data from the psychLit R package:</p>
+<pre class="r"><code>library(psychLit)
+d &lt;- psychLit</code></pre>
+<p>Let’s first load all the relevant R packages that we’ll use to do our work for us:</p>
+<pre class="r"><code>library(tidyverse)
+library(stringr)</code></pre>
+<p>Here, we limit the investigation to Psychonomic Society journals:</p>
+<pre class="r"><code>(journals &lt;- unique(d$`Source title`))</code></pre>
+<pre><code>##  [1] &quot;Acta Psychologica&quot;                                                   
+##  [2] &quot;Applied Cognitive Psychology&quot;                                        
+##  [3] &quot;Attention, Perception, and Psychophysics&quot;                            
+##  [4] &quot;Behavior Research Methods&quot;                                           
+##  [5] &quot;Behavioral and Brain Sciences&quot;                                       
+##  [6] &quot;Cognition&quot;                                                           
+##  [7] &quot;Cognitive, Affective and Behavioral Neuroscience&quot;                    
+##  [8] &quot;Cognitive Psychology&quot;                                                
+##  [9] &quot;Cognitive Science&quot;                                                   
+## [10] &quot;Consciousness and Cognition&quot;                                         
+## [11] &quot;Current Directions in Psychological Science&quot;                         
+## [12] &quot;Journal of Experimental Psychology: General&quot;                         
+## [13] &quot;Journal of Experimental Psychology: Human Perception and Performance&quot;
+## [14] &quot;Journal of Experimental Psychology: Learning Memory and Cognition&quot;   
+## [15] &quot;Journal of Mathematical Psychology&quot;                                  
+## [16] &quot;Journal of Memory and Language&quot;                                      
+## [17] &quot;Learning and Behavior&quot;                                               
+## [18] &quot;Memory &amp; Cognition&quot;                                                  
+## [19] &quot;Perception &amp; Psychophysics&quot;                                          
+## [20] &quot;Psychological Methods&quot;                                               
+## [21] &quot;Psychological Review&quot;                                                
+## [22] &quot;Psychological Science&quot;                                               
+## [23] &quot;Psychonomic Bulletin and Review&quot;                                     
+## [24] &quot;Quarterly Journal of Experimental Psychology&quot;                        
+## [25] &quot;Trends in Cognitive Sciences&quot;</code></pre>
+<pre class="r"><code>d &lt;- filter(d, `Source title` %in% journals[c(3, 4, 7, 17, 18, 23)])</code></pre>
+</div>
+<div id="univariate-figures" class="section level1">
+<h1>Univariate figures</h1>
+<p>This data is very rich, but for this initial exploration, we’ll be focusing on simple uni- and bi-variate figures. In later parts of this tutorial (future blog posts), we’ll start visualizing more complex data, such as keywords, authors, and networks.</p>
+<p>Let’s begin with some simple summaries of what’s been going on, over time, for each journal. We’ll make extensive use of the <a href="http://dplyr.tidyverse.org/articles/dplyr.html">dplyr data manipulation verbs</a> in the following plots. Take a look at the linked website if they are unfamiliar to you; although I will explain more complicated cases, I won’t bother with every detail.</p>
+<div id="publication-years" class="section level2">
+<h2>Publication years</h2>
+<p>First, we’re interested in a simple question: How many articles has each journal published in each year? Are there temporal patterns, and do they differ between journals? The steps for creating this plot are commented in the code below. Roughly, in order of appearance, we first add grouping information to the data frame, then summarise the data on those groups, create a new column for a publication-level summary, and then order the publications on it. We then pass the results to ggplot2 and draw a line and point graph.</p>
+<pre class="r"><code>d %&gt;% 
+    group_by(`Source title`, Year) %&gt;% 
+    summarise(n = n()) %&gt;%  # For each group (Publication, Year), count nobs
+    mutate(nsum = sum(n)) %&gt;%  # For each Publication, sum of nobs {1}
+    ungroup() %&gt;%  # Ungroup data frame
+    mutate(`Source title` = reorder(`Source title`, nsum)) %&gt;%  # {2}
+    ggplot(aes(x=Year, y=n)) +
+    geom_point() +
+    geom_line() +
+    labs(y = &quot;Number of articles published&quot;) +
+    facet_wrap(&quot;`Source title`&quot;, ncol=2)</code></pre>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-i_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>The code in <code>{1}</code> works, because the <code>summarise()</code> command in the above line ungroups the last grouping factor assigned by <code>group_by()</code>. And since I called <code>mutate()</code> instead of summarise, the sum of number of observations was added to each row, instead of collapsing the data by group. <code>{2}</code> made the <code>Source title</code> variable into a factor that’s ordered by the sum of articles across years for that journal; this ordering is useful because when I used <code>facet_wrap()</code> below, the panels are nicely ordered (journals with fewer total papers in the upper left, increasing toward bottom right.)</p>
+<p>If this code doesn’t make any sense, I strongly recommend loading the data into your own R workspace, and executing the code line by line.</p>
+<p>I’m a little surprised at the relative paucity of articles in Learning and Behavior, and it looks like there might be some upward trajectory going on in PBR. Should I run some regressions? Probably not.</p>
+</div>
+<div id="citations" class="section level2">
+<h2>Citations</h2>
+<p>Let’s look at numbers of citations next. For these, simple histograms will do, and we expect to see some heavy tails. I will pre-emptively clip the x-axis at 100 citations, because there’s probably a few rogue publications with a truly impressive citation count, which might make the other, more common, values less visible.</p>
+<pre class="r"><code>d %&gt;% 
+    ggplot(aes(`Cited by`)) +
+    geom_histogram(binwidth=1, col=&quot;black&quot;) +
+    coord_cartesian(xlim=c(0,100)) +
+    facet_wrap(&quot;`Source title`&quot;, ncol=2)</code></pre>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-i_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>Nice. But how many papers are there with more than 100 citations? What’s the proportion of those highly cited papers?</p>
+<pre class="r"><code>d %&gt;%
+    group_by(`Source title`) %&gt;%
+    mutate(total = n()) %&gt;% 
+    filter(`Cited by` &gt; 100) %&gt;% 
+    summarise(total = unique(total),
+              over_100 = n(),
+              ratio = signif(over_100/total, 1)) %&gt;% 
+    arrange(total)</code></pre>
+<pre><code>## # A tibble: 6 x 4
+##   `Source title`                                   total over_100 ratio
+##   &lt;chr&gt;                                            &lt;int&gt;    &lt;int&gt; &lt;dbl&gt;
+## 1 Learning and Behavior                              595        5 0.008
+## 2 Cognitive, Affective and Behavioral Neuroscience   884       65 0.07 
+## 3 Behavior Research Methods                          898       11 0.01 
+## 4 Attention, Perception, and Psychophysics          1710        8 0.005
+## 5 Memory &amp; Cognition                                2481      194 0.08 
+## 6 Psychonomic Bulletin and Review                   3085      187 0.06</code></pre>
+<p>Excellent. We have now reviewed some of the powerful dplyr verbs and are ready for slightly more complex summaries of the data.</p>
+</div>
+</div>
+<div id="bivariate-figures" class="section level1">
+<h1>Bivariate figures</h1>
+<div id="publication-year-and-citations" class="section level2">
+<h2>Publication year and citations</h2>
+<p>We can visualize publication counts over years of publication, but this might not be the most informative graph (because recent articles naturally can’t be as often cited as older ones.) Here, I’ll show how to plot neat box plots (without outliers) with ggplot2:</p>
+<pre class="r"><code>d %&gt;% 
+    filter(`Cited by` &lt; 100) %&gt;% 
+    ggplot(aes(Year, `Cited by`)) +
+    geom_boxplot(aes(group = Year), outlier.color = NA) +
+    facet_wrap(&quot;`Source title`&quot;, ncol=2, scales = &quot;free&quot;)</code></pre>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-i_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+</div>
+<div id="pages-and-citations" class="section level2">
+<h2>Pages and citations</h2>
+<p>The last figure for today is a scatterplot of pages (how many pages the article spans) versus number of citations. For scatterplots I usually prefer empty points (<code>shape=1</code>).</p>
+<pre class="r"><code>d %&gt;% 
+    filter(`Page count` &lt; 100, `Cited by` &lt; 100) %&gt;% 
+    ggplot(aes(`Page count`, `Cited by`)) +
+    geom_point(shape=1) +
+    facet_wrap(&quot;`Source title`&quot;, ncol=2)</code></pre>
+<p><img src="/post/2017-06-01-quantitative-literature-review-with-r-part-i_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+</div>
+</div>
+<div id="summary" class="section level1">
+<h1>Summary</h1>
+<p>We have now scratched the surface of these data, and there is clearly a lot to explore:</p>
+<pre class="r"><code>glimpse(d)</code></pre>
+<pre><code>## Observations: 9,653
+## Variables: 24
+## $ Authors                     &lt;chr&gt; &quot;Todorović D.&quot;, &quot;Cardoso-Leite P.,...
+## $ Title                       &lt;chr&gt; &quot;The effect of the observer vantag...
+## $ Year                        &lt;int&gt; 2009, 2009, 2009, 2009, 2009, 2009...
+## $ `Source title`              &lt;chr&gt; &quot;Attention, Perception, and Psycho...
+## $ Volume                      &lt;int&gt; 71, 71, 71, 71, 71, 71, 71, 71, 71...
+## $ Issue                       &lt;chr&gt; &quot;1&quot;, &quot;1&quot;, &quot;1&quot;, &quot;1&quot;, &quot;1&quot;, &quot;1&quot;, &quot;1&quot;,...
+## $ `Art. No.`                  &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ `Page count`                &lt;int&gt; 10, 12, 2, 11, 14, 16, 11, 8, 5, 5...
+## $ `Cited by`                  &lt;int&gt; 16, 15, 8, NA, 19, 22, 1, 17, 13, ...
+## $ DOI                         &lt;chr&gt; &quot;10.3758/APP.71.1.183&quot;, &quot;10.3758/A...
+## $ Affiliations                &lt;chr&gt; &quot;University of Belgrade, Belgrade,...
+## $ `Authors with affiliations` &lt;chr&gt; &quot;Todorović, D., University of Belg...
+## $ Abstract                    &lt;chr&gt; &quot;Some features of linear perspecti...
+## $ `Author Keywords`           &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ `Index Keywords`            &lt;chr&gt; &quot;art; article; attention; depth pe...
+## $ `Funding Details`           &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ `Funding Text`              &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ References                  &lt;chr&gt; &quot;Ames A., Jr., The illusion of dep...
+## $ `Correspondence Address`    &lt;chr&gt; &quot;Todorović, D.; Laboratory of Expe...
+## $ Publisher                   &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ ISSN                        &lt;chr&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA...
+## $ `PubMed ID`                 &lt;int&gt; 19304608, 19304599, 19304592, NA, ...
+## $ `Abbreviated Source Title`  &lt;chr&gt; &quot;Atten. Percept. Psychophys.&quot;, &quot;At...
+## $ `Document Type`             &lt;chr&gt; &quot;Article&quot;, &quot;Article&quot;, &quot;Article&quot;, &quot;...</code></pre>
+<p>In next posts on this data, we’ll look at networks and other more advanced topics. Stay tuned.</p>
+</div>

@@ -1,0 +1,75 @@
+---
+title: Sharing R products
+author: Matti Vuorre
+date: '2017-08-10'
+slug: sharing-r-products
+categories:
+  - statistics
+tags:
+  - R
+  - research methods
+  - open science
+  - reproducibility
+draft: no
+output:
+  blogdown::html_page:
+    toc: yes
+    number_sections: no
+    toc_depth: 2
+summary: "Don't set R's working directory from an R script."
+bibliography: "/Users/Matti/Documents/vuorre.netlify.com/static/bibliography/blog.bib"
+---
+
+
+<div id="TOC">
+<ul>
+<li><a href="#how-to-share-r-data-and-code">How to share R data and code</a></li>
+<li><a href="#absolute-file-paths">Absolute file paths</a></li>
+<li><a href="#relative-file-paths">Relative file paths</a></li>
+<li><a href="#share-products-not-files">Share products, not files</a></li>
+<li><a href="#references">References</a></li>
+</ul>
+</div>
+
+<div id="how-to-share-r-data-and-code" class="section level1">
+<h1>How to share R data and code</h1>
+<p>Sharing R data (.rda) and R code (.R) files is becoming more common in the social sciences. Brilliant! However, I think that the process of sharing R products could be made significantly easier for everyone involved if people followed one simple piece of advice:</p>
+<p>{{% alert warning %}}
+Don’t set R’s working directory from within an R script.
+{{% /alert %}}</p>
+<p>Sharing data is easy, because users can put the data wherever they want on their computers, and use it from there. However, the majority of shared R scripts I’ve encountered suffer from the same problem: They attempt to, or instruct users to, set the working directory from within the .R script itself:</p>
+<pre class="r"><code>setwd(&quot;C:/user1/arbitrary/and/idiosynchratic/path/&quot;)</code></pre>
+<p>Don’t do it<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a> <span class="citation">(Gandrud 2016)</span>! This practice uses <strong>absolute file paths</strong>, which are bad. Instead, you should be using <strong>relative file paths</strong>, which are good. Let me explain.</p>
+</div>
+<div id="absolute-file-paths" class="section level1">
+<h1>Absolute file paths</h1>
+<p>Setting the working directory from within a script relies on absolute file paths, which point to a specific location on a computer’s hard drive. This absolute location is sensitive to the folders on the user’s computer, because it specifies the entire path to the location (<code>C:/user1/...</code>). Therefore, if your user name isn’t “user1”, or you don’t have exactly the same folders as in the code snippet above, the script won’t run on your computer. I’d like my scripts to run on everyone’s computers!</p>
+<p>Some also recommend that you simply write the appropriate folder inside the quotes in <code>setwd("")</code> once you’ve downloaded the file(s). Why would I do that extra work? What if I later decide to move the file to another folder? It’s much better to use relative file paths instead.</p>
+</div>
+<div id="relative-file-paths" class="section level1">
+<h1>Relative file paths</h1>
+<p>A better option is not to set the working directory at all. Instead, assume that users themselves maintain their computing environment. This is most easily achieved by recommending users to use R Projects, which automatically set the working directory. Then, refer to files in your scripts by using relative file paths. Relative file paths point to files in relation to the script that is doing the referring. For example, if your R script file and data file (e.g. <code>data.csv</code>) are in the same folder, in your script you would refer to the data with:</p>
+<pre class="r"><code>d &lt;- read.csv(&quot;data.csv&quot;)</code></pre>
+<p>No path needed!</p>
+<p>However, if you must set the working directory, use something external to the script, such as R Studio’s GUI to set the working directory.</p>
+</div>
+<div id="share-products-not-files" class="section level1">
+<h1>Share products, not files</h1>
+<p>Once your script files use relative file paths, it doesn’t matter where other users put the downloaded files. The files can be on a shared drive in Spain and users still don’t need to change the path with <code>setwd()</code>. This leads to an important insight: We shouldn’t be sharing individual files in a haphazard manner. Instead, we should share the entire project itself, with its documentation files, data files, code, etc. Importantly, sharing the entire project preserves the links between files (relative file paths), and makes it easy for people to collaborate on projects.</p>
+<p>The simplest way to share the R “product” (all the files!) is to keep all your stuff related to the project under one main folder, and email compressed (.zip) packages of the folder to your collaborators. Of course, with a little bit more effort, you can share the project with collaborators directly, using Dropbox (not great) or GitHub (great).</p>
+<p>Thanks for reading.</p>
+</div>
+<div id="references" class="section level1 unnumbered">
+<h1>References</h1>
+<div id="refs" class="references">
+<div id="ref-gandrud_reproducible_2016">
+<p>Gandrud, Christopher. 2016. <em>Reproducible Research with R and R Studio, Second Edition</em>. CRC Press.</p>
+</div>
+</div>
+</div>
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn1"><p><a href="http://stat405.had.co.nz/lectures/05-shortcuts.pdf" class="uri">http://stat405.had.co.nz/lectures/05-shortcuts.pdf</a><a href="#fnref1" class="footnote-back">↩</a></p></li>
+</ol>
+</div>
