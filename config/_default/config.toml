@@ -1,10 +1,10 @@
 title = "Matti Vuorre"
-baseurl = "https://vuorre2.netlify.com/"
+baseurl = "https://vuorre.netlify.com/"
 copyright = "&copy; {year} Matti Vuorre"
 theme = "academic"
 
 # Get last modified date for content from Git?
-enableGitInfo = true
+enableGitInfo = false
 defaultContentLanguage = "en"
 hasCJKLanguage = false  # Set `true` for Chinese/Japanese/Korean languages.
 defaultContentLanguageInSubdir = false
