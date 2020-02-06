@@ -55,7 +55,7 @@ However, we are often interested in further questions (contrasts, "general linea
 
 To make this concrete, let's consider a hypothetical example data set from [Bolger and Laurenceau (2013)](http://intensivelongitudinal.com/ch4/ch4index.html): Two groups' (`treatment`: 0/1) self-reported `intimacy` was tracked over 16 days (`time`). The dataset contains data from a total of 50 (simulated) individuals.
 
-```{r data, message = FALSE, cache = TRUE}
+```{r data, message = FALSE, cache = TRUE, echo = TRUE}
 library(tidyverse)
 library(rio)
 dat <- import(

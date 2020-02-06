@@ -58,6 +58,13 @@ projects: []
 <div id="example-data" class="section level2">
 <h2>Example data</h2>
 <p>To make this concrete, let’s consider a hypothetical example data set from <a href="http://intensivelongitudinal.com/ch4/ch4index.html">Bolger and Laurenceau (2013)</a>: Two groups’ (<code>treatment</code>: 0/1) self-reported <code>intimacy</code> was tracked over 16 days (<code>time</code>). The dataset contains data from a total of 50 (simulated) individuals.</p>
+<pre class="r"><code>library(tidyverse)
+library(rio)
+dat &lt;- import(
+  &quot;http://www.intensivelongitudinal.com/ch4/ch4R.zip&quot;, 
+  setclass = &quot;tibble&quot;, 
+  colClasses = c(&quot;id&quot; = &quot;factor&quot;, &quot;treatment&quot; = &quot;factor&quot;)
+)</code></pre>
 </div>
 <div id="model" class="section level2">
 <h2>Model</h2>
