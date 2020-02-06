@@ -1,0 +1,218 @@
+---
+title: How to calculate contrasts from a fitted brms model
+author: Matti Vuorre
+date: '2020-02-06'
+slug: how-to-calculate-contrasts-from-a-fitted-brms-model
+categories:
+  - data science
+  - statistics
+tags:
+  - Bayes
+  - brms
+  - R
+  - statistics
+  - tutorial
+subtitle: ''
+summary: ''
+authors: []
+lastmod: '2020-02-06T14:44:40-05:00'
+featured: no
+image:
+  caption: ''
+  focal_point: ''
+  preview_only: no
+output:
+  blogdown::html_page:
+    toc: yes
+    number_sections: no
+    toc_depth: 2
+projects: []
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+<div id="TOC">
+<ul>
+<li><a href="#models-and-contrasts">Models and contrasts</a>
+<ul>
+<li><a href="#example-data">Example data</a></li>
+<li><a href="#model">Model</a></li>
+<li><a href="#interpreting-the-models-parameters">Interpreting the model’s parameters</a></li>
+</ul></li>
+<li><a href="#hypothesis">hypothesis()</a></li>
+<li><a href="#more-contrasts">More contrasts</a>
+<ul>
+<li><a href="#directional-hypotheses-and-posterior-probabilities">Directional hypotheses and posterior probabilities</a></li>
+<li><a href="#multiple-hypotheses">Multiple hypotheses</a></li>
+<li><a href="#hierarchical-hypotheses">Hierarchical hypotheses</a></li>
+</ul></li>
+<li><a href="#conclusion">Conclusion</a></li>
+</ul>
+</div>
+
+<p><a href="https://cran.rstudio.com/web/packages/brms/">brms</a> (Bayesian Regression Models using Stan) is an <a href="https://cran.rstudio.com/">R</a> package that allows fitting complex (multilevel, multivariate, mixture, …) statistical models with straightforward R modeling syntax, while using <a href="https://mc-stan.org/">Stan</a> for bayesian inference under the hood. You will find many uses of that package on this blog. I am particularly fond of brms’ helper functions for post-processing (visualizing, summarizing, etc) the fitted models. In this post, I will show how to calculate and visualize arbitrary contrasts (aka “(general linear) hypothesis tests”) with brms, with full uncertainty estimates.</p>
+<div id="models-and-contrasts" class="section level1">
+<h1>Models and contrasts</h1>
+<p>Here, we will discuss linear models, which regress an outcome variable on a weighted combination of predictors, while allowing the weights to vary across individuals (hierarchical linear regression). After fitting the model, you will have estimates of the weights (“beta weights”, or simply regression parameters) that typically consist of an intercept (estimated level of outcome variable when all predictors are zero) and slopes, which indicate how the outcome variable changes as function of one-unit changes of the predictors, when other predictors are at 0.</p>
+<p>However, we are often interested in further questions (contrasts, “general linear hypothesis tests”). For example, your model output may report one group’s change over time, and the difference of that slope between groups, but you are particularly interested in the other group’s slope. To find that slope, you’d need to calculate an additional contrast from your model. This is also commonly called “probing interactions” or sometimes “post hoc testing”.</p>
+<div id="example-data" class="section level2">
+<h2>Example data</h2>
+<p>To make this concrete, let’s consider a hypothetical example data set from <a href="http://intensivelongitudinal.com/ch4/ch4index.html">Bolger and Laurenceau (2013)</a>: Two groups’ (<code>treatment</code>: 0/1) self-reported <code>intimacy</code> was tracked over 16 days (<code>time</code>). The dataset contains data from a total of 50 (simulated) individuals.</p>
+</div>
+<div id="model" class="section level2">
+<h2>Model</h2>
+<p>We might be interested in how the two groups’ feelings of intimacy developed over time, and how their temporal trajectories of intimacy differed. To be more specific, we have three questions:</p>
+<p>Q1: How did intimacy develop over time for group 0?
+Q2: How did intimacy develop over time for group 1?
+Q3: How different were these two time-courses?</p>
+<p>To answer, we model intimacy as a function of time, treatment, and their interactions. The hierarchical model includes varying intercepts and effects of time across participants.</p>
+<pre class="r"><code>library(brms)
+fit &lt;- brm(
+  intimacy ~ time * treatment + (time | id),
+  family = gaussian(),
+  data = dat,
+  file = here::here(&quot;static/data/intimacymodel&quot;)
+)</code></pre>
+</div>
+<div id="interpreting-the-models-parameters" class="section level2">
+<h2>Interpreting the model’s parameters</h2>
+<p>Let’s then answer our questions by looking at the model’s summary, and interpreting the estimated population-level parameters (the posterior means and standard deviations).</p>
+<table>
+<caption><span id="tab:unnamed-chunk-2">Table 1: </span>Summary of model’s parameters</caption>
+<thead>
+<tr class="header">
+<th align="left">Parameter</th>
+<th align="right">Estimate</th>
+<th align="right">Est.Error</th>
+<th align="right">Q2.5</th>
+<th align="right">Q97.5</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">b_Intercept</td>
+<td align="right">2.90</td>
+<td align="right">0.22</td>
+<td align="right">2.48</td>
+<td align="right">3.34</td>
+</tr>
+<tr class="even">
+<td align="left">b_time</td>
+<td align="right">0.05</td>
+<td align="right">0.02</td>
+<td align="right">0.00</td>
+<td align="right">0.10</td>
+</tr>
+<tr class="odd">
+<td align="left">b_treatment1</td>
+<td align="right">-0.06</td>
+<td align="right">0.30</td>
+<td align="right">-0.67</td>
+<td align="right">0.52</td>
+</tr>
+<tr class="even">
+<td align="left">b_time:treatment1</td>
+<td align="right">0.06</td>
+<td align="right">0.03</td>
+<td align="right">0.00</td>
+<td align="right">0.13</td>
+</tr>
+</tbody>
+</table>
+<p>The first lesson is that most models are simply too complex to interpret by just looking at the numerical parameter estimates. Therefore, we always draw figures to help us interpret what the model thinks is going on. The figure below shows example participants’ data (left) and the model’s estimated effects on the right.</p>
+<p><img src="/post/2020-02-06-how-to-calculate-contrasts-from-a-fitted-brms-model_files/figure-html/figure-1.png" width="672" /></p>
+<p>Then, we can begin interpreting the parameters. First, the <code>intercept</code> indicates estimated intimacy when time and treatment were at their respective baseline levels (0). It is always easiest to interpret the parameters by eyeballing the right panel of the figure above and trying to connect the numbers to the figure. This estimate is the left-most point of the red line.</p>
+<p>The estimated <code>time</code> parameter describes the slope of the red line (Q1); <code>treatment</code> is the difference between the two lines at time zero (Q3). However, we cannot immediately answer Q2 from the parameters, although we can see that the slope of the blue line is about 0.05 + 0.06. To get the answer to Q2, or more generally, any contrast or “general linear hypothesis test” from a brms model, we can use the <code>hypothesis()</code> method.</p>
+</div>
+</div>
+<div id="hypothesis" class="section level1">
+<h1>hypothesis()</h1>
+<p><code>hypothesis()</code> truly is an underappreciated method of the brms package. It can be very useful in probing complex models. It allows us to calculate, visualize, and summarize, with full uncertainty estimates, any transformation of the model’s parameters. These transformations are often called “contrasts” or “general linear hypothesis tests”. But really, they are just transformations of the joint posterior distribution of the model’s parameters.</p>
+<p>To answer Q2, then, we encode our question into a combination of the models parameters:</p>
+<pre class="r"><code>q2 &lt;- c(q2 = &quot;time + time:treatment1 = 0&quot;)</code></pre>
+<p>The slope of group 1 is calculated from the model’s parameters by adding the slope of group 0 (<code>time</code>) and the interaction term <code>time:treatment1</code>. <code>= 0</code> indicates that we are interested in contrasting the resulting estimate the zero (“testing against zero” or even “testing the null hypothesis”). Then, we pass this named string to <code>hypothesis()</code>, and observe the results.</p>
+<pre class="r"><code>q2_answer &lt;- hypothesis(fit, q2)
+q2_answer</code></pre>
+<pre><code>## Hypothesis Tests for class b:
+##   Hypothesis Estimate Est.Error CI.Lower CI.Upper Evid.Ratio Post.Prob Star
+## 1         q2     0.11      0.02     0.06     0.16         NA        NA    *
+## ---
+## &#39;CI&#39;: 90%-CI for one-sided and 95%-CI for two-sided hypotheses.
+## &#39;*&#39;: For one-sided hypotheses, the posterior probability exceeds 95%;
+## for two-sided hypotheses, the value tested against lies outside the 95%-CI.
+## Posterior probabilities of point hypotheses assume equal prior probabilities.</code></pre>
+<p>The output indicates that the estimated answer to Question 2 is 0.11 with a standard error of 0.02. I will return to <code>Evid.Ratio</code> and <code>Post.Prob</code> shortly.</p>
+<p>The results can also be visualized.</p>
+<pre class="r"><code>plot(q2_answer)</code></pre>
+<p><img src="/post/2020-02-06-how-to-calculate-contrasts-from-a-fitted-brms-model_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>That figure shows the (samples from the) posterior distribution of the answer to Question 2.</p>
+</div>
+<div id="more-contrasts" class="section level1">
+<h1>More contrasts</h1>
+<p>With <code>hypothesis()</code> you can answer many additional questions about your model, beyond the parameter estimates. To illustrate, say we are interested in the groups’ difference in intimacy at the end of the study (day 15; Question 4). (The difference at time 0 is reported by the group parameter.)</p>
+<pre class="r"><code>q4 &lt;- c(q4 = &quot;treatment1 + time:treatment1 * 15 = 0&quot;)
+hypothesis(fit, q4)</code></pre>
+<pre><code>## Hypothesis Tests for class b:
+##   Hypothesis Estimate Est.Error CI.Lower CI.Upper Evid.Ratio Post.Prob Star
+## 1         q4     0.86      0.42     0.05     1.67         NA        NA    *
+## ---
+## &#39;CI&#39;: 90%-CI for one-sided and 95%-CI for two-sided hypotheses.
+## &#39;*&#39;: For one-sided hypotheses, the posterior probability exceeds 95%;
+## for two-sided hypotheses, the value tested against lies outside the 95%-CI.
+## Posterior probabilities of point hypotheses assume equal prior probabilities.</code></pre>
+<div id="directional-hypotheses-and-posterior-probabilities" class="section level2">
+<h2>Directional hypotheses and posterior probabilities</h2>
+<p>We can also ask for directional questions. For example, what is the probability that group 0’s slope is greater than 0 (Q5)?</p>
+<pre class="r"><code>q5 &lt;- c(q5 = &quot;time &gt; 0&quot;)
+q5_answer &lt;- hypothesis(fit, q5)
+q5_answer</code></pre>
+<pre><code>## Hypothesis Tests for class b:
+##   Hypothesis Estimate Est.Error CI.Lower CI.Upper Evid.Ratio Post.Prob Star
+## 1         q5     0.05      0.02     0.01     0.09      42.01      0.98    *
+## ---
+## &#39;CI&#39;: 90%-CI for one-sided and 95%-CI for two-sided hypotheses.
+## &#39;*&#39;: For one-sided hypotheses, the posterior probability exceeds 95%;
+## for two-sided hypotheses, the value tested against lies outside the 95%-CI.
+## Posterior probabilities of point hypotheses assume equal prior probabilities.</code></pre>
+<pre class="r"><code>plot(q5_answer)</code></pre>
+<p><img src="/post/2020-02-06-how-to-calculate-contrasts-from-a-fitted-brms-model_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>We can now return to <code>Evid.Ratio</code> and <code>Post.Prob</code>: The latter indicates the posterior probability that the parameter of interest is greater than zero (<code>&gt; 0</code>). (More accurately, the proportion of samples from the posterior that are greater than zero.) That should correspond to what you see in the figure above. The former is the ratio of the hypothesis and its complement (the ratio of <code>time &gt; 0</code> and <code>time &lt; 0</code>). I find posterior probabilities more intuitive than evidence ratios, but they both return essentially the same information. Perhaps of interest, with uniform priors, posterior probabilities will exactly correspond (numerically, not conceptually) to frequentist one-sided p-values (<a href="https://www.ejwagenmakers.com/2017/MarsmanWagenmakers2017ThreeInsights.pdf">Marsman &amp; Wagenmakers, 2017</a>).</p>
+</div>
+<div id="multiple-hypotheses" class="section level2">
+<h2>Multiple hypotheses</h2>
+<p>You can evaluate multiple hypotheses in one function call:</p>
+<pre class="r"><code>hypothesis(fit, c(q2, q4, q5))</code></pre>
+<pre><code>## Hypothesis Tests for class b:
+##   Hypothesis Estimate Est.Error CI.Lower CI.Upper Evid.Ratio Post.Prob Star
+## 1         q2     0.11      0.02     0.06     0.16         NA        NA    *
+## 2         q4     0.86      0.42     0.05     1.67         NA        NA    *
+## 3         q5     0.05      0.02     0.01     0.09      42.01      0.98    *
+## ---
+## &#39;CI&#39;: 90%-CI for one-sided and 95%-CI for two-sided hypotheses.
+## &#39;*&#39;: For one-sided hypotheses, the posterior probability exceeds 95%;
+## for two-sided hypotheses, the value tested against lies outside the 95%-CI.
+## Posterior probabilities of point hypotheses assume equal prior probabilities.</code></pre>
+</div>
+<div id="hierarchical-hypotheses" class="section level2">
+<h2>Hierarchical hypotheses</h2>
+<p>Up to this point, we have “tested” the model’s population level effects. (Parameters for the average person. “Fixed effects.”) Because we fit a hierarchical model with varying intercepts and slopes of time, we can also test the individual specific parameters. For example, we can look at every individual’s estimated intercept (intimacy at time 0):</p>
+<pre class="r"><code>x &lt;- hypothesis(fit, &quot;Intercept = 0&quot;, group = &quot;id&quot;, scope = &quot;coef&quot;)</code></pre>
+<p>In the above, we asked for the results of the hypothesis test, split by group <code>id</code> (which is the grouping factor in our hierarchical model), and indicated <code>coef</code> as the scope. The latter means that the estimates are the subject-specific deviations with the fixed effect added, as opposed to <code>ranef</code>, which are zero-centered.</p>
+<p>The results of this question would be a bit too much information to print on screen, so instead we will draw a figure:</p>
+<pre class="r"><code># Results of hypothesis() in a data.frame
+x$hypothesis %&gt;% 
+  # Obtain group indicators from original data
+  left_join(distinct(dat, Group = id, treatment)) %&gt;% 
+  # Rename Group to id and reverse order for figure
+  mutate(id = factor(Group, levels = rev(1:50))) %&gt;%
+  # Draw a forest plot with ggplot2
+  ggplot(aes(Estimate, id, col = treatment)) +
+  geom_errorbarh(aes(xmin = CI.Lower, xmax = CI.Upper)) +
+  geom_point()</code></pre>
+<p><img src="/post/2020-02-06-how-to-calculate-contrasts-from-a-fitted-brms-model_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+</div>
+</div>
+<div id="conclusion" class="section level1">
+<h1>Conclusion</h1>
+<p>When you find that you have a brms model whose parameters don’t quite answer your questions, <code>hypothesis()</code> will probably give you the answer. For more advanced post-processing of your models, I recommend taking a look at the <a href="http://mjskay.github.io/tidybayes/">tidybayes</a> package.</p>
+</div>
