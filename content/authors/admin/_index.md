@@ -10,19 +10,18 @@ authors:
 superuser: true
 
 # Role/position
-role: Postdoctoral Research Scientist
+role: Postdoctoral Researcher
 
 # Organizations/Affiliations
 organizations:
-- name: Columbia University
-  url: "https://psychology.columbia.edu/"
+- name: University of Oxford
+  url: "https://www.oii.ox.ac.uk/"
 
 # Short bio (displayed in user profile at end of posts)
-bio: Cognitive scientist at Columbia University
+bio: Postdoctoral Researcher at the Oxford Internet Institute
 
 interests:
-- Confidence and curiosity
-- Cognition
+- Psychology
 - Applied Statistics
 
 education:
@@ -45,12 +44,10 @@ education:
 
 # Social/Academic Networking
 # For available icons, see: https://sourcethemes.com/academic/docs/widgets/#icons
-#   For an email link, use "fas" icon pack, "envelope" icon, and a link in the
-#   form "mailto:your-email@example.com" or "#contact" for contact widget.
 social:
 - icon: envelope
   icon_pack: fas
-  link: 'mailto:mv2521@columbia.edu'  # For a direct email link, use "mailto:test@example.org".
+  link: 'mailto:matti.vuorre@oii.ox.ac.uk'  # For a direct email link, use "mailto:test@example.org".
 - icon: twitter
   icon_pack: fab
   link: https://twitter.com/vuorre
@@ -69,9 +66,9 @@ social:
 
 # Link to a PDF of your resume/CV from the About widget.
 # To enable, copy your resume/CV to `static/files/cv.pdf` and uncomment the lines below.  
-# - icon: cv
-#   icon_pack: ai
-#   link: pdf/cv.pdf
+- icon: cv
+  icon_pack: ai
+  link: pdf/cv.pdf
 
 # Enter email to display Gravatar (if Gravatar enabled in Config)
 email: ""
@@ -83,7 +80,4 @@ email: ""
 # - Visitors
 ---
 
-I completed a PhD in Psychology at Columbia University in 2018. I am now a postdoctoral research scientist at Columbia, where I study human information processing and metacognition. I want to find out why we believe some things but not others, how confidence in those beliefs is formed, what drives our curiosity to learn more, and how all this works in today's hyper-connected, digital world. To study these topics, I use behavioral experiments, electroencephalography, and statistical modelling.
-
-&hearts; Hierarchical bayesian modelling  
-&hearts; Open science
+I am a Postdoctoral Researcher at the [Oxford Internet Institute](https://www.oii.ox.ac.uk/), where I study the psychological effects of digital technologies. An increasing proportion of the human experience is now mediated by digital technology and taking place online. I want to know what are the impacts of the increased use of those technologies on our cognition, well-being, and social interactions. 

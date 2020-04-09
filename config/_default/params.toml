@@ -90,11 +90,11 @@ email = "mv2521@columbia.edu"
 
 # Address
 # For country_code, use the 2-letter ISO code (see https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2 )
-address = {street = "1190 Amsterdam Avenue", city = "New York", region = "NY", postcode = "10027", country = "United States", country_code = "US"}
+address = {street = "1 St Giles", city = "Oxford", region = "Oxfordshire", postcode = "OX1 3JS", country = "United Kingdom", country_code = "UK"}
 
 # Geographic coordinates
 # To get your coordinates, right-click on Google Maps and choose "What's here?". The coords will show up at the bottom.
-coordinates = {latitude = "40.8087", longitude = "-73.959649"}
+coordinates = {latitude = "51.755707", longitude = "-1.258846"}
 
 # Directions for visitors to locate you.
 # directions = "Enter Building 1 and take the stairs to Office 200 on Floor 2"
