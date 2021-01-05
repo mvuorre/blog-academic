@@ -24,3 +24,7 @@
   for = "index.xml"
   [headers.values]
     Content-Type = "application/rss+xml"
+
+[[redirects]]
+  from = "/post/2017/02/16/science-of-consciousness-talks-on-youtube/"
+  to = "https://vuorre.netlify.app/"
