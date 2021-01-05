@@ -26,6 +26,6 @@
     Content-Type = "application/rss+xml"
 
 [[redirects]]
-  from = "/post/2017/02/16/science-of-consciousness-talks-on-youtube"
-  to = "https://vuorre.netlify.app"
+  from = "post/2020/02/06/how-to-calculate-contrasts-from-a-fitted-brms-model/"
+  to = "https://mvuorre.github.io/blog/posts/2020-02-06-how-to-calculate-contrasts-from-a-fitted-brms-model/"
   force = true
