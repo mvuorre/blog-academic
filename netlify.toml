@@ -29,3 +29,8 @@
   from = "post/2020/02/06/how-to-calculate-contrasts-from-a-fitted-brms-model/"
   to = "https://mvuorre.github.io/blog/posts/2020-02-06-how-to-calculate-contrasts-from-a-fitted-brms-model/"
   force = true
+
+[[redirects]]
+  from = "post/2016/09/29/meta-analysis-is-a-special-case-of-bayesian-multilevel-modeling/"
+  to = "https://mvuorre.github.io/blog/posts/2016-09-29-bayesian-meta-analysis/"
+  force = true
