@@ -94,3 +94,18 @@
   from = "post/2016/09/29/meta-analysis-is-a-special-case-of-bayesian-multilevel-modeling/"
   to = "https://mvuorre.github.io/posts/2016-09-29-bayesian-meta-analysis/"
   force = true
+
+[[redirects]]
+  from = "post/2016/03/24/github-style-waffle-plots-in-r/"
+  to = "https://mvuorre.github.io/posts/2016-03-24-github-waffle-plot/"
+  force = true
+
+[[redirects]]
+  from = "post/2016/03/15/plots-with-subplots-in-r/"
+  to = "https://mvuorre.github.io/posts/2016-03-15-ggplot-plots-subplots/"
+  force = true
+
+[[redirects]]
+  from = "post/2016/03/06/multilevel-confidence/"
+  to = "https://mvuorre.github.io/posts/2016-03-06-multilevel-predictions/"
+  force = true
